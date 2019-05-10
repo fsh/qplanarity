@@ -7,8 +7,10 @@ import random as rnd
 import logging
 import itertools
 import math
+from pathlib import Path
+import pickle
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
 
 app = QApplication(sys.argv)
@@ -24,25 +26,27 @@ gray_pen = QPen(Qt.gray)
 
 
 class RandomGraph2(object):
-  """
-  Random Planar Graph Mk2.
+  """Random Planar Graph Mk2.
 
-  Algorithm works as follows. At each step we attach a number of triangles to the outside of the graph along randomly chosen
-  edges. Then we form a new face of N+1 edges by picking N edges that run along the outside and adding an edge between their
-  non-shared endpoints. These two steps are repeated until certain criteria are met.
+  Algorithm works as follows. At each step we attach a number of triangles to
+  the outside of the graph along randomly chosen edges. Then we form a new face
+  of N+1 edges by picking N edges that run along the outside and adding an edge
+  between their non-shared endpoints. These two steps are repeated until
+  certain criteria are met.
 
   Parameters:
+
   """
-  def __init__(self, node_limit=30, outside_limit=None, ):
+  def __init__(self, node_limit=30, outside_limit=None):
     self.outside_edges = set([(0,1),(1,2),(0,2)])
     self.node_idx = 3
     self.limit = node_limit
     if outside_limit is None:
       # Try to limit edges on the outside to some percentage of the amount of nodes in the graph? Not sure what this parameter should be.
-      outside_limit = int(node_limit*0.75 + 0.5)
+      outside_limit = 5 + int(node_limit*0.5 + 0.5)
 
-    self.denseness_parameter = 0.3 # [0-1) higher number will have greater chance of generating clusters of highly connected nodes
-    self.sparseness_parameter = 0.6 # [0-1) ]higher number will generate larger 'holes' or 'lakes' in the graph (too close to 1.0 might stall the algo)
+    self.denseness_parameter = 0.2 # [0-1) lower number will have greater chance of generating clusters of highly connected nodes
+    self.sparseness_parameter = 0.7 # [0-1) ]higher number will generate larger 'holes' or 'lakes' in the graph (too close to 1.0 might stall the algo)
 
     log.info("Generating random graph of %d nodes with ~%d outside edges", node_limit, outside_limit)
     self.edges = set()
@@ -81,6 +85,8 @@ class RandomGraph2(object):
         break
   def removeLines(self):
     """Removes random outside lines. Does not increase node count."""
+    if len(self.outside_edges) < 5:
+      return
     ab = rnd.choice(tuple(self.outside_edges))
     self.outside_edges.remove(ab)
     self.edges.add(ab)
@@ -92,12 +98,12 @@ class RandomGraph2(object):
         log.debug("end=%s xy=%s", str(endpoints), str(xy))
         if xy == endpoints:
           # We've gone too far and curled all the way around the outside! Let's retry.
-          return self.removeLines()
+          assert False, "sanity failed, this should never occur"
         if xy[0] in endpoints or xy[1] in endpoints:
           # We found a line connected to one of the endpoints.
           other = xy
           break
-      assert(other is not None) # Sanity check.
+      assert other is not None, "failed to find other outside line" # Sanity check.
       self.outside_edges.remove(xy)
       self.edges.add(xy)
       if xy[0] in endpoints:
@@ -105,8 +111,8 @@ class RandomGraph2(object):
       else:
         xy = (sum(endpoints) - xy[1], xy[0])
       endpoints = (min(xy), max(xy))
-      log.debug("remvoing %s, new endpoints=%s", str(xy), str(endpoints))
-      if rnd.random() > self.sparseness_parameter:
+      log.debug("removing %s, new endpoints=%s", str(xy), str(endpoints))
+      if rnd.random() > self.sparseness_parameter or len(self.outside_edges) < 5:
         break
     self.outside_edges.add(endpoints)
 
@@ -134,7 +140,10 @@ class Node(QGraphicsEllipseItem):
     self.setBrush(blue_brush)
     self.scene().hover(self, False)
   def mousePressEvent(self, evt):
-    self.scene().updateNode(self)
+    if evt.button() == Qt.RightButton:
+      self.scene().gravity(self)
+    else:
+      self.scene().updateNode(self)
   def mouseMoveEvent(self, evt):
     self.setPos(evt.scenePos())
     self.scene().updateNode(self)
@@ -142,33 +151,41 @@ class Node(QGraphicsEllipseItem):
     self.scene().checkVictory()
 
 
+def random_circle_points(n):
+  # # Find a number close to the square root of n that is coprime with n and use
+  # # linear congruence.
+  # a = int(math.sqrt(n))
+  # while math.gcd(a,n) > 1:
+  #   a += 1
+  # for i in range(n):
+  #   ri = (a*i + 0xbabe) % n
+  #   yield 200.0 * QPointF(math.cos(2*math.pi*ri/n),
+  #                         math.sin(2*math.pi*ri/n))
+
+  # Do is the simple way instead.
+  pts = [200.0 * QPointF(math.cos(i*math.tau/n),
+                         math.sin(i*math.tau/n)) for i in range(n)]
+  rnd.shuffle(pts)
+  return pts
+
+
 class Scene(QGraphicsScene):
   victory = pyqtSignal()
   progress = pyqtSignal(int,int)
   refit = pyqtSignal()
 
-  def __init__(self, n, *args):
+  def __init__(self, *args):
     super().__init__(*args)
-    self.init(n)
 
-  def init(self, n=300):
+  def init(self, edges, node2lines, pt_list):
     self.clear()
-    g = RandomGraph1(n)
+    n = len(node2lines)
 
-    # Find a number close to the square root of n that is coprime with n.
-    a = int(math.sqrt(n))
-    while math.gcd(a,n) > 1:
-      a += 1
-
-    # First create & place the nodes but don't add them to the scene just yet so we can do more efficient collision detection.
     self.nodes = []
-    for i in range(n):
+    for i, pt in enumerate(pt_list):
       self.nodes.append(Node(i))
-      ri = (a*i + 0xbabe) % n
-      self.nodes[i].setPos(200.0*math.cos(2*math.pi*ri/n),
-                           200.0*math.sin(2*math.pi*ri/n))
+      self.nodes[i].setPos(pt)
 
-    edges, node2lines = g.getEdges()
     lines = dict()
     collisions = dict()
     for ab in edges:
@@ -196,6 +213,10 @@ class Scene(QGraphicsScene):
     self.collisions = collisions
     self.z_count = 1.0
 
+  def neighbors(self, node):
+    for (a,b) in self.node2lines[node.idx]:
+      yield self.nodes[a+b-node.idx]
+
   def hover(self, node, onoff):
     self.z_count += 0.01
     others = self.node2lines[node.idx]
@@ -205,10 +226,16 @@ class Scene(QGraphicsScene):
         line.setPen(thick_pen)
       else:
         line.setPen(black_pen if ab in self.untangled else gray_pen)
-    for (a,b) in others:
-      o = a+b-node.idx
-      self.nodes[o].setBrush(red_brush if onoff else blue_brush)
-      self.nodes[o].setZValue(self.z_count)
+    for other in self.neighbors(node):
+      other.setBrush(red_brush if onoff else blue_brush)
+      other.setZValue(self.z_count)
+
+  def gravity(self, node):
+    for other in self.neighbors(node):
+      z = other.pos() - node.pos()
+      z *= 0.9
+      other.setPos(z + node.pos())
+      self.updateNode(other)
 
   def updateNode(self, node):
     # Check this node's edges to remove any potential collisions.
@@ -226,8 +253,8 @@ class Scene(QGraphicsScene):
         # We have a regular collision.
         coll.add(l.ab)
 
-      #log.debug("Collisions for line %s: %s", str(ab), str(list(sorted(coll))))
-      #log.debug("Previous collisions       : %s", str(list(sorted(self.collisions.get(ab,set())))))
+      log.debug("Collisions for line %s: %s", str(ab), str(list(sorted(coll))))
+      log.debug("Previous collisions       : %s", str(list(sorted(self.collisions.get(ab,set())))))
       # Check previous collisions.
       for xy in self.collisions.get(ab, ()):
         if xy in coll:
@@ -237,7 +264,7 @@ class Scene(QGraphicsScene):
         #log.debug("Removing %s-%s", str(xy), str(ab))
         self.collisions[xy].remove(ab)
         if len(self.collisions[xy]) == 0:
-          log.debug("Is now collision free")
+          log.debug("Is now collision free: %s", str(xy))
           del self.collisions[xy]
           self.untangled.add(xy)
           self.lines[xy].setPen(black_pen)
@@ -251,11 +278,12 @@ class Scene(QGraphicsScene):
             log.debug("Tangling up %s", str(xy))
             self.untangled.remove(xy)
             self.collisions[xy] = set()
+            self.lines[xy].setPen(gray_pen)
           self.collisions[xy].add(ab)
       elif ab in self.collisions:
         del self.collisions[ab]
         self.untangled.add(ab)
-    log.info("%.2f%% untangled", 100.0 * len(self.untangled)/float(len(self.lines)))
+    log.debug("%.2f%% untangled", 100.0 * len(self.untangled)/float(len(self.lines)))
     self.progress.emit(len(self.untangled), len(self.lines))
 
     # # Sanity checking.
@@ -293,66 +321,74 @@ class View(QGraphicsView):
     #print("scenerect", self.scene().sceneRect())
     self.fitInView(ib, Qt.KeepAspectRatio)
 
-N = int(sys.argv[1])
-scene = Scene(N)
-view = View(scene)
-window = QMainWindow()
-anim = None
-blur = QGraphicsBlurEffect()
+state_file = Path('qplanarity.state')
 
-
-# scene.victory.connect(foo)
-
-view.setScene(scene)
-
-class Contents(QWidget):
+class MainWindow(QMainWindow):
   def __init__(self, *args):
-    super().__init__(*args)
+    super().__init__(*args, windowTitle="QPLanarity")
 
-    self.label = QLabel("QPlanarity!")
-    lay = QVBoxLayout()
-    lay.addWidget(view)
-    lay.addWidget(self.label)
-    self.setLayout(lay)
+    self.a_quit = QAction("Quit", shortcut="Ctrl+Q", triggered=self.close)
+    self.a_newgame = QAction("New Game", shortcut="Ctrl+N", triggered=self.newGame)
+
+    tb = QToolBar(toolButtonStyle=Qt.ToolButtonTextOnly)
+    tb.addAction(self.a_newgame)
+    tb.addAction(self.a_quit)
+    self.addToolBar(tb)
+
+    self.statusBar().showMessage(" ")
+    self.view = None
+    self.setCentralWidget(QLabel("Welcome to QPlanarity!\nCtrl+N = New Game\nCtrl+Q = Quit"))
+
+    if state_file.is_file():
+      with state_file.open('rb') as f:
+        (pts,self._graph) = pickle.load(f)
+        self.init(*self._graph, [QPointF(x,y) for x,y in pts])
+
+
+  def closeEvent(self, evt):
+    print("close event")
+    if self.view is None:
+      return
+
+    scene = self.view.scene()
+    pts = [(n.pos().x(), n.pos().y()) for n in scene.nodes]
+    log.info("Saving state to qplanarity.state")
+    with state_file.open('wb') as f:
+      pickle.dump((pts,self._graph), f)
+
+  def newGame(self):
+    n, ok = QInputDialog.getInt(None, "New Game", "Node Count", 20, 5, 10000)
+    if not ok:
+      return
+
+    try:
+      g = RandomGraph2(n)
+    except Exception as e:
+      log.warning(f"Error generating graph: {str(e)}")
+      return
+    self._graph = g.getEdges()
+    self.init(*self._graph)
+
+  def init(self, edges, node2lines, pts=None):
+    scene = Scene()
+    if pts is None:
+      pts = random_circle_points(len(node2lines))
+    scene.init(edges, node2lines, pts)
+
+    view = View(scene)
+    self.view = view
+    self.view.setBackgroundBrush(QBrush(Qt.white, Qt.SolidPattern))
     scene.progress.connect(self.progress)
     scene.victory.connect(self.victory)
+    view.setScene(scene)
+    self.setCentralWidget(view)
 
   def progress(self, a, b):
-    self.label.setText("%d out of %d lines untangled (%.1f%%)" % (a, b, 100.0*a/b))
+    self.statusBar().showMessage(f"{a} out of {b} lines untangled ({a/b:.1%})")
   def victory(self):
-    lbl = QLabel(self)
-    lbl.setText("YOU WIN")
-    lbl.setGeometry(50, 50, 100, 100)
+    self.view.setBackgroundBrush(QBrush(QColor("blanchedalmond"), Qt.SolidPattern))
 
-
-contents = Contents()
-
-def foo():
-  #blur.setBlurHints(QGraphicsBlurEffect.AnimationHint)
-  global anim
-  anim = QPropertyAnimation(blur, "blurRadius".encode())
-  anim.setDuration(10000)
-  anim.setStartValue(0.0)
-  anim.setEndValue(25.0)
-  contents.setGraphicsEffect(blur)
-  anim.start()
-  print("animation start")
-
-
-window.setCentralWidget(contents)
+window = MainWindow()
 window.show()
-
-# foo()
-# print(anim)
-# timer = QTimer()
-# timer.setInterval(100)
-# def gogo():
-#   print("hello %f" % blur.blurRadius())
-#   #scene.update(scene.sceneRect())
-#   #scene.advance()
-#   contents.repaint()
-#   contents.resize(500,500)
-# timer.timeout.connect(gogo)
-# timer.start()
 
 sys.exit(app.exec_())
