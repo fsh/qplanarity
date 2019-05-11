@@ -1,8 +1,0 @@
-
-* Auto-save state.
-* Zoom with mouse wheel.
-* Multiselection.
-* Gravity.
-* End of game screen.
-* Timing (high score list?)
-

@@ -386,6 +386,58 @@ class View(QGraphicsView):
     #print("scenerect", self.scene().sceneRect())
     self.fitInView(ib, Qt.KeepAspectRatio)
 
+# class BoxLayout(QBoxLayout):
+#   def __init__(self, tree, direction=QBoxLayout.TopToBottom):
+#     super().__init__(direction)
+
+#     for x in tree:
+#       if isinstance(x, tuple):
+#         self.addItem(*x)
+#       else:
+#         self.addItem(x)
+
+#   def addItem(self, x, stretch=0):
+#     if isinstance(x, str):
+#       self.addWidget(QLabel(x), stretch)
+#     elif isinstance(x, list):
+#       self.addLayout(BoxLayout(x, self.nextDirection()), stretch)
+#     elif isinstance(x, int):
+#       self.addSpacing(x)
+#     elif x is None:
+#       self.addStretch(1 if stretch == 0 else stretch)
+#     elif isinstance(x, QLayout):
+#       self.addLayout(x, stretch)
+#     else:
+#       self.addWidget(x, stretch)
+
+#   def nextDirection(self):
+#     if self.direction() == QBoxLayout.TopToBottom:
+#       return QBoxLayout.LeftToRight
+#     return QBoxLayout.TopToBottom
+
+# class GameDialog(QDialog):
+#   def __init__(self, *args):
+#     super().__init__(*args, windowTitle="New Game")
+
+#     self.setLayout(BoxLayout([
+#       []
+#     ]))
+#     layout = QHBoxLayout()
+#     layout.addWidget()
+#     layout.addLayout
+
+newgame_text = """
+Enter game parameters.
+
+Two graph generation modes currently exist:
+delaunay N
+melange N
+
+Delaunay graphs are more regular and easier. Melange graphs can be much more
+lopsided and might require more fiddling to make planar. In both cases the
+second parameter is the number of desired nodes in the graph.
+"""
+
 state_file = Path('qplanarity.state')
 
 class MainWindow(QMainWindow):
@@ -422,12 +474,18 @@ class MainWindow(QMainWindow):
       pickle.dump((pts,self._graph), f)
 
   def newGame(self):
-    n, ok = QInputDialog.getInt(None, "New Game", "Node Count", 20, 5, 10000)
+    inp, ok = QInputDialog.getText(self, "New Game", newgame_text, text="delaunay 20")
     if not ok:
+      return
+    inp = inp.split()
+
+    if len(inp) == 0 or inp[0] not in ('delaunay', 'melange'):
+      QMessageBox.warning(self, "Invalid Graph", f"Invalid graph type: '{inp[0] if inp else ''}'\nMust be one of 'delaunay' or 'melange'.")
       return
 
     try:
-      g = RandomGraph3(n)
+      n = 20 if len(inp) < 2 else int(inp[1])
+      g = RandomGraph3(n) if inp[0] == 'delaunay' else RandomGraph2(n)
     except Exception as e:
       log.warning(f"Error generating graph: {str(e)}")
       return

@@ -1,0 +1,8 @@
+
+- [X] Auto-save state.
+- [ ] Zoom with mouse wheel.
+- [ ] Multiselection.
+- [X] "Gravity" (pull nodes toward current node).
+- [ ] End of game screen.
+- [ ] Timing (high score list?).
+
