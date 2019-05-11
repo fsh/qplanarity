@@ -177,14 +177,6 @@ class RandomGraph3():
   def getEdges(self):
     return self.edges, self.n2e
 
-def show(x,y,simp=None):
-  fig,ax = plt.subplots()
-  if simp is not None:
-    ax.triplot(x,y,simp)
-  ax.scatter(x,y)
-  for i in range(len(x)):
-    ax.annotate(f"{i}", (x[i],y[i]))
-  plt.show()
 
 def random_disc_points(n):
   r, t = np.random.random((2,n))
