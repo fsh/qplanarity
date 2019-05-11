@@ -10,6 +10,10 @@ import math
 from pathlib import Path
 import pickle
 
+# These two are only used for Graph3 generation.
+import numpy as np
+from scipy.spatial import Delaunay
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
 
@@ -123,6 +127,72 @@ class RandomGraph2(object):
       n2e[b].append((a,b))
     return (self.edges, n2e)
 
+
+class RandomGraph3():
+  """Generates a random planar graph by calculating a Delaunay triangulation on a
+  random set of points in the unit disc and then removing random edges.
+
+  """
+
+  def __init__(self, n):
+    self.n2e = []
+    self.edges = set()
+    self.discard_chance = 0.33
+    self.banned = set() # Banned (discarded) edges.
+    self.init(n)
+
+  def edge_count(self, v):
+    return len(self.n2e[v])
+
+  def add_edge(self, a, b):
+    if (a,b) in self.edges or (a,b) in self.banned:
+      return
+
+    # Extend n2e list.
+    for _ in range(len(self.n2e), b+1):
+      self.n2e.append([])
+
+    if self.edge_count(a) >= 2 and self.edge_count(b) >= 2 and rnd.random() < self.discard_chance:
+      log.info(f"Discarding edge: ({a},{b})")
+      self.banned.add((a,b))
+      return
+
+    self.edges.add((a,b))
+    self.n2e[a].append((a,b))
+    self.n2e[b].append((a,b))
+
+
+  def init(self, n):
+    delaunay = Delaunay(random_disc_points(n))
+    for pts in delaunay.simplices:
+      # Sort points & add edges.
+      a, c = min(pts), max(pts)
+      b = sum(pts) - a - c
+      self.add_edge(a,b)
+      self.add_edge(a,c)
+      self.add_edge(b,c)
+
+    log.info(f"Generated Delaunay graph w/ {len(self.edges)} edges and {len(self.n2e)} nodes")
+
+  def getEdges(self):
+    return self.edges, self.n2e
+
+def show(x,y,simp=None):
+  fig,ax = plt.subplots()
+  if simp is not None:
+    ax.triplot(x,y,simp)
+  ax.scatter(x,y)
+  for i in range(len(x)):
+    ax.annotate(f"{i}", (x[i],y[i]))
+  plt.show()
+
+def random_disc_points(n):
+  r, t = np.random.random((2,n))
+  r = np.sqrt(r)
+  t *= math.tau
+  return np.stack([r * np.cos(t), r * np.sin(t)], axis=-1)
+
+
 class Node(QGraphicsEllipseItem):
   def __init__(self, idx, *args):
     super().__init__(-5.0, -5.0, 10.0, 10.0, *args)
@@ -234,6 +304,9 @@ class Scene(QGraphicsScene):
     for other in self.neighbors(node):
       z = other.pos() - node.pos()
       z *= 0.9
+      if QPointF.dotProduct(z, z) < 30.0**2:
+        # Only pull nodes that are further away than 3x diameter of nodes.
+        continue
       other.setPos(z + node.pos())
       self.updateNode(other)
 
@@ -362,7 +435,7 @@ class MainWindow(QMainWindow):
       return
 
     try:
-      g = RandomGraph2(n)
+      g = RandomGraph3(n)
     except Exception as e:
       log.warning(f"Error generating graph: {str(e)}")
       return
@@ -392,3 +465,4 @@ window = MainWindow()
 window.show()
 
 sys.exit(app.exec_())
+
