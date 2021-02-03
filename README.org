@@ -1,0 +1,38 @@
+
+* QPlanarity
+
+QPlanarity is a little puzzle game about untangling graphs.
+
+If you love the meditative feeling of jigsaw puzzles, then you might
+like this game. It's a relaxation game, a stress relief kind of thing.
+Feels great to make everything neat and planar.
+
+* Installing
+
+TODO
+
+* Tips
+
+- Right click nodes (the circles) to "nudge" its connected neighbors
+  toward it. Useful for large graphs where nodes overlap a lot.
+- The state of the graph is saved on exit, so you shouldn't lose any
+  progress.
+- Try to weave the tangled mess into a pattern of little triangles if
+  you lose track of what's going on.
+- A solution is /always/ possible.
+
+* Screenshots
+
+#+CAPTION: The start of a game
+[[./sc1.png]]
+
+#+CAPTION: In the process of untangling a graph
+
+[[./sc2.png]]
+
+#+CAPTION: An untangled graph
+
+[[./sc3.png]]
+
+#+CAPTION: The start of a huge graph
+[[./sc4.png]]

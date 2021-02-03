@@ -1,8 +1,9 @@
 
 - [X] Auto-save state.
 - [ ] Zoom with mouse wheel.
+- [X] Make the auto-fit optional.
 - [ ] Multiselection.
 - [X] "Gravity" (pull nodes toward current node).
-- [ ] End of game screen.
-- [ ] Timing (high score list?).
+- [ ] End of game screen?
+- [ ] Timing/high score list? (Not really: intended to be a relaxation/meditative thing.)
 
