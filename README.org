@@ -23,16 +23,20 @@ TODO
 
 * Screenshots
 
+Start of the game:
 #+CAPTION: The start of a game
-[[./sc1.png]]
+[[./scr1.png]]
 
+In the process of untangling a graph:
 #+CAPTION: In the process of untangling a graph
 
-[[./sc2.png]]
+[[./scr2.png]]
 
+An untangled graph:
 #+CAPTION: An untangled graph
 
-[[./sc3.png]]
+[[./scr3.png]]
 
+Start of a huge graph:
 #+CAPTION: The start of a huge graph
-[[./sc4.png]]
+[[./scr4.png]]
