@@ -6,4 +6,4 @@
 - [X] "Gravity" (pull nodes toward current node).
 - [ ] End of game screen?
 - [ ] Timing/high score list? (Not really: intended to be a relaxation/meditative thing.)
-
+- [X] Save state in home config.

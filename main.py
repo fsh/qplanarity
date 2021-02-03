@@ -17,8 +17,17 @@ from scipy.spatial import Delaunay
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
 
+
 app = QApplication(sys.argv)
 app.setApplicationName('QPlanarity')
+
+config_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation))
+
+if not config_path.exists():
+  config_path.mkdir(parents=True)
+
+state_file = config_path / 'qplanarity.state'
+
 
 blue_brush = QBrush(Qt.blue, Qt.SolidPattern)
 red_brush = QBrush(Qt.red, Qt.SolidPattern)
@@ -495,6 +504,8 @@ class View(QGraphicsView):
 #     layout.addWidget()
 #     layout.addLayout
 
+
+
 newgame_text = """
 Enter game parameters.
 
@@ -507,7 +518,6 @@ be much more lopsided and might require more fiddling to make planar.
 Both options only take a single parameter, namely the number of of
 desired nodes in the graph."""
 
-state_file = Path('qplanarity.state')
 
 class MainWindow(QMainWindow):
   def __init__(self, *args):
@@ -537,7 +547,6 @@ class MainWindow(QMainWindow):
 
 
   def closeEvent(self, evt):
-    print("close event")
     if self.view is None:
       return
 
