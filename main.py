@@ -14,18 +14,84 @@ import pickle
 import numpy as np
 from scipy.spatial import Delaunay
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
 
 app = QApplication(sys.argv)
+app.setApplicationName('QPlanarity')
 
 blue_brush = QBrush(Qt.blue, Qt.SolidPattern)
 red_brush = QBrush(Qt.red, Qt.SolidPattern)
 magenta_brush = QBrush(Qt.magenta, Qt.SolidPattern)
 black_pen = QPen(Qt.black)
 thick_pen = QPen(Qt.black)
-thick_pen.setWidth(2.0)
 gray_pen = QPen(Qt.gray)
+for pen in [black_pen, thick_pen, gray_pen]:
+  pen.setCosmetic(True)
+thick_pen.setWidthF(4.0)
+gray_pen.setWidthF(2.0)
+black_pen.setWidthF(2.0)
+
+
+import dataclasses
+
+@dataclasses.dataclass(frozen=True)
+class edge():
+  """An edge acts sort of like a two-element tuple that sorts its arguments, so
+  `edge(x,y) == edge(y,x)`.
+
+  Invariant: `edge.a <= edge.b`.
+
+  `edge1 & edge2` returns the common vertex between two edges or None if the
+  edges are not contiguous.
+
+  """
+  a: int
+  b: int
+
+  def __init__(self, a: int, b: int):
+    if a > b:
+      b,a = a,b
+    object.__setattr__(self, 'a', a)
+    object.__setattr__(self, 'b', b)
+
+  def __contains__(self, x):
+    return x == self.a or x == self.b
+
+  def __iter__(self):
+    return iter(dataclasses.astuple(self))
+
+  def __and__(self, other):
+    if self.a in other:
+      return self.a
+    if self.b in other:
+      return self.b
+    return None
+
+@dataclasses.dataclass
+class graph():
+  edges: set = dataclasses.field(default_factory=set)
+  n2e: list = dataclasses.field(default_factory=list)
+
+  def num_edges(self):
+    return len(self.e)
+  def num_nodes(self):
+    return len(self.n2e)
+
+  def degree(self, n):
+    return len(self.n2e[n])
+
+  def add_edge(self, e):
+    if e in self.edges:
+      return
+
+    # Extend n2e list.
+    if e.b >= self.num_nodes():
+      self.n2e.extend(set() for _ in range(self.num_nodes(), e.b + 1))
+
+    self.edges.add(e)
+    self.n2e[e.a].add(e)
+    self.n2e[e.b].add(e)
 
 
 
@@ -187,7 +253,7 @@ def random_disc_points(n):
 
 class Node(QGraphicsEllipseItem):
   def __init__(self, idx, *args):
-    super().__init__(-5.0, -5.0, 10.0, 10.0, *args)
+    super().__init__(-10.0, -10.0, 20.0, 20.0, *args)
     self.idx = idx
     self.setBrush(blue_brush)
     self.setAcceptHoverEvents(True)
@@ -433,10 +499,10 @@ Two graph generation modes currently exist:
 delaunay N
 melange N
 
-Delaunay graphs are more regular and easier. Melange graphs can be much more
-lopsided and might require more fiddling to make planar. In both cases the
-second parameter is the number of desired nodes in the graph.
-"""
+Delaunay graphs are more regular and can be easier. Melange graphs can
+be much more lopsided and might require more fiddling to make planar.
+Both options only take a single parameter, namely the number of of
+desired nodes in the graph."""
 
 state_file = Path('qplanarity.state')
 
@@ -483,8 +549,16 @@ class MainWindow(QMainWindow):
       QMessageBox.warning(self, "Invalid Graph", f"Invalid graph type: '{inp[0] if inp else ''}'\nMust be one of 'delaunay' or 'melange'.")
       return
 
+    n = 20 if len(inp) < 2 else int(inp[1])
+    if n >= 1000:
+      if QMessageBox.question(self, "Warning!", "Graph generation might take a long time, continue?") != QMessageBox.Yes:
+        return
+    if n < 3 or n >= 20000:
+      QMessageBox.warning(self, "Invalid Graph", f"Invalid <N>: {n}")
+      return
+
     try:
-      n = 20 if len(inp) < 2 else int(inp[1])
+      assert inp[0] in ['delaunay', 'melange', '']
       g = RandomGraph3(n) if inp[0] == 'delaunay' else RandomGraph2(n)
     except Exception as e:
       log.warning(f"Error generating graph: {str(e)}")
