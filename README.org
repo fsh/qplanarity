@@ -9,7 +9,11 @@ Feels great to make everything neat and planar.
 
 * Installing
 
-TODO
+Use pip:
+
+=$ pip install qplanarity=
+
+This should install a script/app/whatever called qplanarity.
 
 * Tips
 
