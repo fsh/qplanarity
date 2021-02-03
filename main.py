@@ -436,15 +436,18 @@ class Scene(QGraphicsScene):
 
 
 class View(QGraphicsView):
-  def __init__(self, scene, *args):
+  def __init__(self, scene, act_resize, *args):
     super().__init__(*args)
     self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
     self.setScene(scene)
     scene.refit.connect(lambda: self.resizeEvent(None), Qt.QueuedConnection)
+    self.act_resize = act_resize
 
   def resizeEvent(self, evt):
+    if not self.act_resize.isChecked():
+      return
     ib = self.scene().itemsBoundingRect().marginsAdded(QMarginsF(20,20,20,20))
     #print(self.scene().sceneRect())
     #print("ib", ib, "YES" if evt is None else "NO")
@@ -512,10 +515,15 @@ class MainWindow(QMainWindow):
 
     self.a_quit = QAction("Quit", shortcut="Ctrl+Q", triggered=self.close)
     self.a_newgame = QAction("New Game", shortcut="Ctrl+N", triggered=self.newGame)
-
+    self.a_autoresize = QAction(
+      "Autoresize",
+      shortcut="Ctrl+R",
+      checkable=True,
+      checked=True)
     tb = QToolBar(toolButtonStyle=Qt.ToolButtonTextOnly)
     tb.addAction(self.a_newgame)
     tb.addAction(self.a_quit)
+    tb.addAction(self.a_autoresize)
     self.addToolBar(tb)
 
     self.statusBar().showMessage(" ")
@@ -572,7 +580,7 @@ class MainWindow(QMainWindow):
       pts = random_circle_points(len(node2lines))
     scene.init(edges, node2lines, pts)
 
-    view = View(scene)
+    view = View(scene, self.a_autoresize)
     self.view = view
     self.view.setBackgroundBrush(QBrush(Qt.white, Qt.SolidPattern))
     scene.progress.connect(self.progress)
