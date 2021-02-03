@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -602,8 +603,11 @@ class MainWindow(QMainWindow):
   def victory(self):
     self.view.setBackgroundBrush(QBrush(QColor("blanchedalmond"), Qt.SolidPattern))
 
-window = MainWindow()
-window.show()
+def main():
+  window = MainWindow()
+  window.show()
+  return app.exec_()
 
-sys.exit(app.exec_())
+if __name__ == '__main__':
+  sys.exit(main())
 
