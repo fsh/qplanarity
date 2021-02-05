@@ -263,7 +263,7 @@ def random_disc_points(n):
 
 class Node(QGraphicsEllipseItem):
   def __init__(self, idx, *args):
-    super().__init__(-10.0, -10.0, 20.0, 20.0, *args)
+    super().__init__(-12.0, -12.0, 24.0, 24.0, *args)
     self.idx = idx
     self.setBrush(blue_brush)
     self.setAcceptHoverEvents(True)
