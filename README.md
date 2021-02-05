@@ -1,5 +1,5 @@
 
-* QPlanarity
+# QPlanarity
 
 QPlanarity is a little puzzle game about untangling graphs.
 
@@ -7,15 +7,15 @@ If you love the meditative feeling of jigsaw puzzles, then you might
 like this game. It's a relaxation game, a stress relief kind of thing.
 Feels great to make everything neat and planar.
 
-* Installing
+# Installing
 
-Use pip:
+Use `pip` or `pip3`:
 
-=$ pip install qplanarity=
+    $ pip install qplanarity
 
 This should install a script/app/whatever called qplanarity.
 
-* Tips
+# Tips
 
 - Right click nodes (the circles) to "nudge" its connected neighbors
   toward it. Useful for large graphs where nodes overlap a lot.
@@ -25,22 +25,16 @@ This should install a script/app/whatever called qplanarity.
   you lose track of what's going on.
 - A solution is /always/ possible.
 
-* Screenshots
+# Screenshots
 
 Start of the game:
-#+CAPTION: The start of a game
-[[./scr1.png]]
+![scr1](./scr1.png)
 
 In the process of untangling a graph:
-#+CAPTION: In the process of untangling a graph
-
-[[./scr2.png]]
+![scr2](./scr2.png)
 
 An untangled graph:
-#+CAPTION: An untangled graph
-
-[[./scr3.png]]
+![scr3](./scr3.png)
 
 Start of a huge graph:
-#+CAPTION: The start of a huge graph
-[[./scr4.png]]
+![scr4](./scr4.png)
