@@ -268,6 +268,7 @@ class Node(QGraphicsEllipseItem):
     self.setBrush(blue_brush)
     self.setAcceptHoverEvents(True)
     self.setZValue(1.0)
+    self.setFlags(QGraphicsItem.ItemIgnoresTransformations)
 
   def hoverEnterEvent(self, evt):
     log.debug("(%d) Enter hover", self.idx)
