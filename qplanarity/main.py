@@ -18,9 +18,30 @@ from scipy.spatial import Delaunay
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
 
+from .qtutils import FSettings, FLayout, ColorButton
 
-app = QApplication(sys.argv)
-app.setApplicationName('QPlanarity')
+
+class PlanarityApp(QApplication):
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.setOrganizationName('qplanarity')
+    self.setApplicationName('qplanarity')
+
+app = PlanarityApp(sys.argv)
+
+defaults = {
+  'node': {
+    'color': {
+      'normal': QColor('#2244bb'),
+      'hover': QColor('#5b9fff'),
+      'solved': QColor('#e7d08b'),
+    },
+    'size': 24,
+  }
+}
+
+S = FSettings(appname='qplanarity')
+S.installOptions(defaults)
 
 config_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation))
 
@@ -269,25 +290,43 @@ class Node(QGraphicsEllipseItem):
     self.setAcceptHoverEvents(True)
     self.setZValue(1.0)
     self.setFlags(QGraphicsItem.ItemIgnoresTransformations)
+    self._hover = False
+    self._solved = False
 
   def hoverEnterEvent(self, evt):
     log.debug("(%d) Enter hover", self.idx)
-    self.setBrush(red_brush)
     self.scene().hover(self, True)
   def hoverLeaveEvent(self, evt):
     log.debug("(%d) Leave hover", self.idx)
-    self.setBrush(blue_brush)
     self.scene().hover(self, False)
+
   def mousePressEvent(self, evt):
     if evt.button() == Qt.RightButton:
       self.scene().gravity(self)
     else:
       self.scene().updateNode(self)
+  
   def mouseMoveEvent(self, evt):
     self.setPos(evt.scenePos())
     self.scene().updateNode(self)
   def mouseReleaseEvent(self, evt):
     self.scene().checkVictory()
+
+  def updateBrushes(self):
+    if not (scene := self.scene()):
+      return
+    if self._hover:
+      self.setBrush(scene._brush_hover)
+    elif self._solved:
+      self.setBrush(scene._brush_solved)
+    else:
+      self.setBrush(scene._brush_normal)
+    
+    self.setRect(scene._node_rect)
+    
+  def setSolved(self, flag):
+    self._solved = flag
+    self.updateBrushes()
 
 
 def random_circle_points(n):
@@ -313,8 +352,26 @@ class Scene(QGraphicsScene):
   progress = pyqtSignal(int,int)
   refit = pyqtSignal()
 
-  def __init__(self, *args):
+  def __init__(self, settings, *args):
     super().__init__(*args)
+    self.nodes = []
+    self.untangled = set()
+    self.lines = []
+    self.node2lines = dict()
+    self.z_count = 1.0
+    
+    self.S = settings
+    self.S['node'].onChange.connect(self.updateBrushes)
+    self.updateBrushes()
+
+  def updateBrushes(self):
+    self._brush_normal = QBrush(self.S['node/color/normal'].get(), Qt.SolidPattern)
+    self._brush_hover = QBrush(self.S['node/color/hover'].get(), Qt.SolidPattern)
+    self._brush_solved = QBrush(self.S['node/color/solved'].get(), Qt.SolidPattern)
+    radius = float(self.S['node/size'].get())
+    self._node_rect = QRectF(-radius, -radius, radius*2, radius*2)
+    for n in self.nodes:
+      n.updateBrushes()
 
   def init(self, edges, node2lines, pt_list):
     self.clear()
@@ -322,8 +379,9 @@ class Scene(QGraphicsScene):
 
     self.nodes = []
     for i, pt in enumerate(pt_list):
-      self.nodes.append(Node(i))
-      self.nodes[i].setPos(pt)
+      obj = Node(i)
+      obj.setPos(pt)
+      self.nodes.append(obj)
 
     lines = dict()
     collisions = dict()
@@ -352,6 +410,21 @@ class Scene(QGraphicsScene):
     self.collisions = collisions
     self.z_count = 1.0
 
+  def postInit(self):
+    for i,lines in enumerate(self.node2lines):
+      solved = False
+      for ab in lines:
+        if ab in self.collisions:
+          break
+      else:
+        solved = True
+      if self.nodes[i]._solved != solved:
+        self.nodes[i]._solved = solved
+
+    self.updateBrushes()
+    if not len(self.collisions):
+      self.victory.emit()
+
   def neighbors(self, node):
     for (a,b) in self.node2lines[node.idx]:
       yield self.nodes[a+b-node.idx]
@@ -365,9 +438,13 @@ class Scene(QGraphicsScene):
         line.setPen(thick_pen)
       else:
         line.setPen(black_pen if ab in self.untangled else gray_pen)
+
+    node._hover = onoff
+    node.updateBrushes()
     for other in self.neighbors(node):
-      other.setBrush(red_brush if onoff else blue_brush)
+      other._hover = onoff
       other.setZValue(self.z_count)
+      other.updateBrushes()
 
   def gravity(self, node):
     for other in self.neighbors(node):
@@ -395,8 +472,8 @@ class Scene(QGraphicsScene):
         # We have a regular collision.
         coll.add(l.ab)
 
-      log.debug("Collisions for line %s: %s", str(ab), str(list(sorted(coll))))
-      log.debug("Previous collisions       : %s", str(list(sorted(self.collisions.get(ab,set())))))
+      # log.debug("Collisions for line %s: %s", str(ab), str(list(sorted(coll))))
+      # log.debug("Previous collisions       : %s", str(list(sorted(self.collisions.get(ab,set())))))
       # Check previous collisions.
       for xy in self.collisions.get(ab, ()):
         if xy in coll:
@@ -426,6 +503,18 @@ class Scene(QGraphicsScene):
         del self.collisions[ab]
         self.untangled.add(ab)
     log.debug("%.2f%% untangled", 100.0 * len(self.untangled)/float(len(self.lines)))
+
+    for i,lines in enumerate(self.node2lines):
+      solved = False
+      for ab in lines:
+        if ab in self.collisions:
+          break
+      else:
+        solved = True
+      if self.nodes[i]._solved != solved:
+        self.nodes[i]._solved = solved
+        self.nodes[i].updateBrushes()
+    
     self.progress.emit(len(self.untangled), len(self.lines))
 
     # # Sanity checking.
@@ -466,46 +555,41 @@ class View(QGraphicsView):
     #print("scenerect", self.scene().sceneRect())
     self.fitInView(ib, Qt.KeepAspectRatio)
 
-# class BoxLayout(QBoxLayout):
-#   def __init__(self, tree, direction=QBoxLayout.TopToBottom):
-#     super().__init__(direction)
 
-#     for x in tree:
-#       if isinstance(x, tuple):
-#         self.addItem(*x)
-#       else:
-#         self.addItem(x)
 
-#   def addItem(self, x, stretch=0):
-#     if isinstance(x, str):
-#       self.addWidget(QLabel(x), stretch)
-#     elif isinstance(x, list):
-#       self.addLayout(BoxLayout(x, self.nextDirection()), stretch)
-#     elif isinstance(x, int):
-#       self.addSpacing(x)
-#     elif x is None:
-#       self.addStretch(1 if stretch == 0 else stretch)
-#     elif isinstance(x, QLayout):
-#       self.addLayout(x, stretch)
-#     else:
-#       self.addWidget(x, stretch)
+class PlanaritySettings(QDialog):
+  visibilityChanged = pyqtSignal(bool)
 
-#   def nextDirection(self):
-#     if self.direction() == QBoxLayout.TopToBottom:
-#       return QBoxLayout.LeftToRight
-#     return QBoxLayout.TopToBottom
+  def __init__(self, S, *args, **kwargs):
+    super().__init__(*args, **kwargs)
 
-# class GameDialog(QDialog):
-#   def __init__(self, *args):
-#     super().__init__(*args, windowTitle="New Game")
+    size_slider = QSlider(
+      minimum=1, maximum=80,
+      orientation=Qt.Horizontal, value=S['node/size'].get(),
+      valueChanged=S['node/size'].set)
 
-#     self.setLayout(BoxLayout([
-#       []
-#     ]))
-#     layout = QHBoxLayout()
-#     layout.addWidget()
-#     layout.addLayout
+    self.setLayout(FLayout(
+      [
+        ["Size of balls", size_slider],
+        ["Normal balls", ColorButton(S['node/color/normal'])],
+        ["Touched balls", ColorButton(S['node/color/hover'])],
+        ["Untangled balls", ColorButton(S['node/color/solved'])],
+      ]))
 
+    vis_action = QAction("Options", shortcut="Ctrl+O", checkable=True,
+                         triggered=self.setVisible, checked=self.isVisible())
+    vis_action.triggered.connect(self.setVisible)
+    self.visAction = vis_action
+
+    self.addAction(vis_action)
+    self.addAction(QAction("Close", self, shortcut="Ctrl+Q", triggered=self.close))
+
+  def showEvent(self, evt):
+    self.visAction.setChecked(True)
+  def hideEvent(self, evt):
+    self.visAction.setChecked(False)
+    
+    
 
 
 newgame_text = """
@@ -522,9 +606,13 @@ desired nodes in the graph."""
 
 
 class MainWindow(QMainWindow):
-  def __init__(self, *args):
+  def __init__(self, S, *args):
     super().__init__(*args, windowTitle="QPLanarity")
 
+    self.S = S
+    sett_window = PlanaritySettings(S)
+    self._options = sett_window
+    
     self.a_quit = QAction("Quit", shortcut="Ctrl+Q", triggered=self.close)
     self.a_newgame = QAction("New Game", shortcut="Ctrl+N", triggered=self.newGame)
     self.a_autoresize = QAction(
@@ -535,6 +623,7 @@ class MainWindow(QMainWindow):
     tb = QToolBar(toolButtonStyle=Qt.ToolButtonTextOnly)
     tb.addAction(self.a_newgame)
     tb.addAction(self.a_quit)
+    tb.addAction(self._options.visAction)
     tb.addAction(self.a_autoresize)
     self.addToolBar(tb)
 
@@ -549,6 +638,8 @@ class MainWindow(QMainWindow):
 
 
   def closeEvent(self, evt):
+    self._options.close()
+    
     if self.view is None:
       return
 
@@ -586,7 +677,7 @@ class MainWindow(QMainWindow):
     self.init(*self._graph)
 
   def init(self, edges, node2lines, pts=None):
-    scene = Scene()
+    scene = Scene(self.S)
     if pts is None:
       pts = random_circle_points(len(node2lines))
     scene.init(edges, node2lines, pts)
@@ -596,16 +687,20 @@ class MainWindow(QMainWindow):
     self.view.setBackgroundBrush(QBrush(Qt.white, Qt.SolidPattern))
     scene.progress.connect(self.progress)
     scene.victory.connect(self.victory)
-    view.setScene(scene)
     self.setCentralWidget(view)
+    scene.postInit()
 
   def progress(self, a, b):
     self.statusBar().showMessage(f"{a} out of {b} lines untangled ({a/b:.1%})")
   def victory(self):
     self.view.setBackgroundBrush(QBrush(QColor("blanchedalmond"), Qt.SolidPattern))
 
+
+
+
+    
 def main():
-  window = MainWindow()
+  window = MainWindow(S)
   window.show()
   return app.exec_()
 

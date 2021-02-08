@@ -5,10 +5,11 @@ from setuptools import setup
 setup(
   name='qplanarity',
   description='Puzzle game about untangling graphs',
-  version='1.0.1',
+  version='1.1.0',
 
   long_description_content_type='text/markdown', # when is text/org going to be supported pls thx
   long_description=open('README.md', 'r').read(),
+  keywords='planarity game qt5 untangle planar graph untangling'.split(),
   
   url='https://gitlab.com/franksh/qplanarity',
   author='Frank S. Hestvik',
