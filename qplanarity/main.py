@@ -340,7 +340,7 @@ def random_circle_points(n):
   #   yield 200.0 * QPointF(math.cos(2*math.pi*ri/n),
   #                         math.sin(2*math.pi*ri/n))
 
-  # Do is the simple way instead.
+  # Do it the simple way instead.
   pts = [200.0 * QPointF(math.cos(i*math.tau/n),
                          math.sin(i*math.tau/n)) for i in range(n)]
   rnd.shuffle(pts)
@@ -356,7 +356,7 @@ class Scene(QGraphicsScene):
     super().__init__(*args)
     self.nodes = []
     self.untangled = set()
-    self.lines = []
+    self.lines = dict()
     self.node2lines = dict()
     self.z_count = 1.0
     
@@ -383,19 +383,17 @@ class Scene(QGraphicsScene):
       obj.setPos(pt)
       self.nodes.append(obj)
 
-    lines = dict()
+    self.lines = lines = dict()
     collisions = dict()
     for ab in edges:
       a,b = ab
       lines[ab] = self.addLine(QLineF(self.nodes[a].pos(), self.nodes[b].pos()), gray_pen)
       lines[ab].ab = ab
 
-      for l in lines[ab].collidingItems(Qt.IntersectsItemShape):
+      for xy in self.getCollisions(ab):
         # Skip lines that just collide on connection.
-        if len(set(l.ab + ab)) < 4:
-          continue
-        collisions.setdefault(ab, set()).add(l.ab)
-        collisions.setdefault(l.ab, set()).add(ab)
+        collisions.setdefault(ab, set()).add(xy)
+        collisions.setdefault(xy, set()).add(ab)
 
     self.untangled = set(edges - collisions.keys())
     for e in self.untangled:
@@ -405,7 +403,6 @@ class Scene(QGraphicsScene):
     for i in range(n):
       self.addItem(self.nodes[i])
 
-    self.lines = lines
     self.node2lines = node2lines
     self.collisions = collisions
     self.z_count = 1.0
@@ -456,24 +453,25 @@ class Scene(QGraphicsScene):
       other.setPos(z + node.pos())
       self.updateNode(other)
 
+  def getCollisions(self, ab):
+    linef = self.lines[ab].line()
+    for xy,l in self.lines.items():
+      if ab[0] in xy or ab[1] in xy:
+        continue
+      typ, pt = linef.intersects(self.lines[xy].line())
+      if typ == QLineF.BoundedIntersection:
+        yield xy
+      
   def updateNode(self, node):
     # Check this node's edges to remove any potential collisions.
     for ab in self.node2lines[node.idx]:
       a,b = ab
       self.lines[ab].setLine(QLineF(self.nodes[a].pos(), self.nodes[b].pos()))
-      coll = set()
-      for l in self.lines[ab].collidingItems(Qt.IntersectsItemShape):
-        # Skip nodes.
-        if not isinstance(l, QGraphicsLineItem):
-          continue
-        # If lines are connected, skip.
-        if len(set(l.ab + ab)) < 4:
-          continue
-        # We have a regular collision.
-        coll.add(l.ab)
+      coll = set(self.getCollisions(ab))
 
       # log.debug("Collisions for line %s: %s", str(ab), str(list(sorted(coll))))
       # log.debug("Previous collisions       : %s", str(list(sorted(self.collisions.get(ab,set())))))
+
       # Check previous collisions.
       for xy in self.collisions.get(ab, ()):
         if xy in coll:
@@ -502,7 +500,7 @@ class Scene(QGraphicsScene):
       elif ab in self.collisions:
         del self.collisions[ab]
         self.untangled.add(ab)
-    log.debug("%.2f%% untangled", 100.0 * len(self.untangled)/float(len(self.lines)))
+    # log.debug("%.2f%% untangled", 100.0 * len(self.untangled)/float(len(self.lines)))
 
     for i,lines in enumerate(self.node2lines):
       solved = False
