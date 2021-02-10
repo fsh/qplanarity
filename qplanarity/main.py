@@ -292,13 +292,15 @@ class Node(QGraphicsEllipseItem):
     self.setBrush(blue_brush)
     self.setAcceptHoverEvents(True)
     self.setZValue(1.0)
-    self.setFlags(QGraphicsItem.ItemIgnoresTransformations)
+    self.setFlags(QGraphicsItem.ItemIgnoresTransformations
+                  | QGraphicsItem.ItemIsSelectable)
     self._hover = False
     self._solved = False
 
   def hoverEnterEvent(self, evt):
     log.debug("(%d) Enter hover", self.idx)
     self.scene().hover(self, True)
+  
   def hoverLeaveEvent(self, evt):
     log.debug("(%d) Leave hover", self.idx)
     self.scene().hover(self, False)
@@ -310,12 +312,10 @@ class Node(QGraphicsEllipseItem):
       self.scene().drag_start(self)
   
   def mouseMoveEvent(self, evt):
-    self.setPos(evt.scenePos())
-    self.scene().drag_move(self)
+    self.scene().drag_move(self, evt.scenePos())
 
   def mouseReleaseEvent(self, evt):
     self.scene().drag_stop(self)
-    self.scene().checkVictory()
 
   def updateBrushes(self):
     if not (scene := self.scene()):
@@ -451,6 +451,7 @@ class Scene(QGraphicsScene):
     self.S = settings
     self.S['node'].onChange.connect(self.updateBrushes)
     self.updateBrushes()
+    self._grp = None
 
   def updateBrushes(self):
     self._brush_normal = QBrush(self.S['node/color/normal'].get(), Qt.SolidPattern)
@@ -485,6 +486,7 @@ class Scene(QGraphicsScene):
 
     self.node2lines = node2lines
     self.z_count = 1.0
+    self._grp = None
 
   def postInit(self):
     list(self.find_solved())
@@ -506,11 +508,9 @@ class Scene(QGraphicsScene):
         continue
 
       self.drag_start(other)
-      
-      other.setPos(z + node.pos())
 
-      self.drag_move(other)
-      self.drag_stop(other)      
+      self.drag_move(other, z + node.pos())
+      self.drag_stop(other)
 
   def node_lines(self, idx):
     return {
@@ -533,10 +533,24 @@ class Scene(QGraphicsScene):
         yield i
 
   def drag_start(self, node):
-    lc = self.node_lines(node.idx)
-    self.line_coll.move_begin(lc)
+    sel = self.selectedItems()
+    if node not in sel:
+      self.clearSelection()
+      lc = self.node_lines(node.idx)
+      self.line_coll.move_begin(lc)
+    else:
+      self._grp = sel
+      self._grppos = node.pos()
 
-  def drag_move(self, node):
+  def drag_move(self, node, pos):
+    if self._grp:
+      delta = pos - node.pos()
+      for n in self._grp:
+        n.setPos(n.pos() + delta)
+      return
+
+    node.setPos(pos)
+
     lc = self.node_lines(node.idx)
     for ab, ln in lc.items():
       self.lines[ab].setLine(ln)
@@ -554,10 +568,34 @@ class Scene(QGraphicsScene):
 
     self.progress.emit(len(self.line_coll.free), len(self.lines))
 
+  def update_selection_drag(self, delta):
+    self.clearSelection()
+    _grp = self._grp
+    self._grp = None
+
+    for n in _grp:
+      n.setPos(n.pos() + delta)
+
+    for n in _grp:
+      self.drag_start(n)
+      self.drag_move(n, n.pos() - delta)
+      self.drag_stop(n)
+
+      for ab in self.node2lines[n.idx]:
+        line = self.lines[ab]
+        line.setPen(self.line_pen(ab))
+
+
   def drag_stop(self, node):
+    if self._grp:
+      self.update_selection_drag(self._grppos - node.pos())
+      return
+
     self.line_coll.move_stop()
     for i in self.find_solved():
       self.nodes[i].updateBrushes()
+
+    self.checkVictory()
 
   def hover(self, node, onoff):
     self.z_count += 0.01
@@ -582,26 +620,66 @@ class Scene(QGraphicsScene):
       self.victory.emit()
 
 
+
+
 class View(QGraphicsView):
   def __init__(self, scene, act_resize, *args):
     super().__init__(*args)
     self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+
+    self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+    #self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+    
     self.setScene(scene)
     scene.refit.connect(lambda: self.resizeEvent(None), Qt.QueuedConnection)
     self.act_resize = act_resize
 
+    self.setDragMode(QGraphicsView.RubberBandDrag)
+
   def resizeEvent(self, evt):
     if not self.act_resize.isChecked():
       return
-    ib = self.scene().itemsBoundingRect().marginsAdded(QMarginsF(20,20,20,20))
+    margins = QMarginsF(30.0, 30.0, 30.0, 30.0)
+    ib = self.scene().itemsBoundingRect()
     #print(self.scene().sceneRect())
     #print("ib", ib, "YES" if evt is None else "NO")
-    self.scene().setSceneRect(ib)
+    self.scene().setSceneRect(ib.marginsAdded(margins * 100))
     #print("scenerect", self.scene().sceneRect())
-    self.fitInView(ib, Qt.KeepAspectRatio)
+    self.fitInView(ib.marginsAdded(margins), Qt.KeepAspectRatio)
 
+
+  def mousePressEvent(self, evt):
+    if evt.button() == Qt.RightButton:
+      self.setDragMode(QGraphicsView.ScrollHandDrag)
+      super().mousePressEvent(evt)
+      if evt.isAccepted():
+        return
+      fake = QMouseEvent(QEvent.MouseButtonPress, QPointF(evt.pos()), Qt.LeftButton, evt.buttons(), Qt.KeyboardModifiers())
+      super().mousePressEvent(fake)
+    else:
+      super().mousePressEvent(evt)
+    
+  def wheelEvent(self, evt):
+    factor = 1.2
+    if evt.angleDelta().y() < 0:
+      factor = 1.0 / factor
+    self.scale(factor, factor)
+
+  def mouseMoveEvent(self, evt):
+    super().mouseMoveEvent(evt)
+    if evt.isAccepted():
+      return
+    evt.accept()
+
+  def mouseReleaseEvent(self, evt):
+    if evt.button() == Qt.RightButton:
+      fake = QMouseEvent(QEvent.MouseButtonRelease, QPointF(evt.pos()),
+                         Qt.LeftButton, evt.buttons(), Qt.KeyboardModifiers())
+      super().mouseReleaseEvent(fake)
+      self.setDragMode(QGraphicsView.RubberBandDrag)
+    super().mouseReleaseEvent(evt)
 
 
 class PlanaritySettings(QDialog):
@@ -652,6 +730,11 @@ Both options only take a single parameter, namely the number of of
 desired nodes in the graph."""
 
 
+about_text = """
+
+
+"""
+
 class MainWindow(QMainWindow):
   def __init__(self, S, *args):
     super().__init__(*args, windowTitle="QPLanarity")
@@ -676,7 +759,18 @@ class MainWindow(QMainWindow):
 
     self.statusBar().showMessage(" ")
     self.view = None
-    self.setCentralWidget(QLabel("Welcome to QPlanarity!\nCtrl+N = New Game\nCtrl+Q = Quit"))
+    self.setCentralWidget(QLabel("""
+Welcome to QPlanarity!
+
+Left mouse: drag (when hovering a ball), or select multiple balls
+Right mouse: pull adjacent balls (when hovering), or pan the scene
+Mouse wheel: zoom in and out
+
+Ctrl+N = New Game
+Ctrl+Q = Quit
+Ctrl+O = Options
+
+"""))
 
     if state_file.is_file():
       with state_file.open('rb') as f:
