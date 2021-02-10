@@ -18,6 +18,8 @@ from scipy.spatial import Delaunay
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
 
+PERF_DEBUG = False
+
 from .qtutils import FSettings, FLayout, ColorButton
 
 
@@ -260,7 +262,8 @@ class RandomGraph3():
 
 
   def init(self, n):
-    delaunay = Delaunay(random_disc_points(n))
+    self._solution = random_disc_points(n)
+    delaunay = Delaunay(self._solution)
     for pts in delaunay.simplices:
       # Sort points & add edges.
       a, c = min(pts), max(pts)
@@ -304,12 +307,14 @@ class Node(QGraphicsEllipseItem):
     if evt.button() == Qt.RightButton:
       self.scene().gravity(self)
     else:
-      self.scene().updateNode(self)
+      self.scene().drag_start(self)
   
   def mouseMoveEvent(self, evt):
     self.setPos(evt.scenePos())
-    self.scene().updateNode(self)
+    self.scene().drag_move(self)
+
   def mouseReleaseEvent(self, evt):
+    self.scene().drag_stop(self)
     self.scene().checkVictory()
 
   def updateBrushes(self):
@@ -347,6 +352,90 @@ def random_circle_points(n):
   return pts
 
 
+
+class LineColl():
+  def __init__(self, lines):
+    self.lines = dict(lines)
+
+    self.free = set()
+    check = set(self.lines.keys())
+    left = set(self.lines.keys())
+    while check:
+      ab = check.pop()
+      left.remove(ab)
+      thisline = self.lines[ab]
+      dirty = set()
+      for xy in left:
+        if xy[0] in ab or xy[1] in ab:
+          continue
+        typ, _ = thisline.intersects(self.lines[xy])
+        if typ == QLineF.BoundedIntersection:
+          dirty.add(xy)
+      if not dirty:
+        self.free.add(ab)
+      else:
+        check -= dirty
+
+  def is_gray(self, ab):
+    line1 = self.lines[ab]
+    for xy, line2 in self.lines.items():
+      if xy[0] in ab or xy[1] in ab:
+        continue
+      typ, _ = line1.intersects(line2)
+      if typ == QLineF.BoundedIntersection:
+        return True
+    return False
+    
+  def move_begin(self, lines):
+    self.tmp_lines = lines
+    self.tmp_truegray = set()
+    self.tmp_gray = self.calc_gray()
+
+  def move_update(self, lines):
+    self.tmp_lines = lines
+    self.lines.update(lines)
+    now_gray = self.calc_gray()
+
+    # new gray: for sure
+    new_gray = now_gray - self.tmp_gray
+
+    # now free lines: need to check if they were gray before or not
+    
+    new_black = self.tmp_gray - now_gray
+    self.tmp_truegray.update(xy for xy in new_black if xy not in self.tmp_truegray and self.is_gray(xy))
+    new_black -= self.tmp_truegray
+
+    self.tmp_gray = now_gray
+
+    self.free -= new_gray
+    self.free |= new_black
+    return new_gray, new_black
+
+  def move_stop(self):
+    for ab in self.tmp_lines.keys():
+      if self.is_gray(ab):
+        self.free.discard(ab)
+      else:
+        self.free.add(ab)
+
+  def calc_gray(self):
+    "Finds the lines now intersecting tmp_lines"
+    gray = set()
+    for xy, ln2 in self.lines.items():
+      x,y = xy
+      for ab, ln1 in self.tmp_lines.items():
+        if x in ab or y in ab:
+          continue
+        typ, _ = ln1.intersects(ln2)
+        if typ == QLineF.BoundedIntersection:
+          gray.add(xy)
+          break
+    return gray
+
+    
+
+
+
 class Scene(QGraphicsScene):
   victory = pyqtSignal()
   progress = pyqtSignal(int,int)
@@ -355,7 +444,6 @@ class Scene(QGraphicsScene):
   def __init__(self, settings, *args):
     super().__init__(*args)
     self.nodes = []
-    self.untangled = set()
     self.lines = dict()
     self.node2lines = dict()
     self.z_count = 1.0
@@ -383,48 +471,93 @@ class Scene(QGraphicsScene):
       obj.setPos(pt)
       self.nodes.append(obj)
 
+    linedict = {(a,b): QLineF(pt_list[a], pt_list[b]) for a,b in edges}
+
+    self.line_coll = LineColl(linedict)
+
     self.lines = lines = dict()
-    collisions = dict()
-    for ab in edges:
-      a,b = ab
-      lines[ab] = self.addLine(QLineF(self.nodes[a].pos(), self.nodes[b].pos()), gray_pen)
-      lines[ab].ab = ab
-
-      for xy in self.getCollisions(ab):
-        # Skip lines that just collide on connection.
-        collisions.setdefault(ab, set()).add(xy)
-        collisions.setdefault(xy, set()).add(ab)
-
-    self.untangled = set(edges - collisions.keys())
-    for e in self.untangled:
-      lines[e].setPen(black_pen)
+    for ab, ln in linedict.items():
+      lines[ab] = self.addLine(ln, self.line_pen(ab))
 
     # Now add the nodes.
     for i in range(n):
       self.addItem(self.nodes[i])
 
     self.node2lines = node2lines
-    self.collisions = collisions
     self.z_count = 1.0
 
   def postInit(self):
-    for i,lines in enumerate(self.node2lines):
-      solved = False
-      for ab in lines:
-        if ab in self.collisions:
-          break
-      else:
-        solved = True
-      if self.nodes[i]._solved != solved:
-        self.nodes[i]._solved = solved
+    list(self.find_solved())
 
     self.updateBrushes()
-    if not len(self.collisions):
+    if len(self.line_coll.free) == len(self.lines):
       self.victory.emit()
 
   def neighbors(self, node):
     for (a,b) in self.node2lines[node.idx]:
       yield self.nodes[a+b-node.idx]
+
+  def gravity(self, node):
+    for other in self.neighbors(node):
+      z = other.pos() - node.pos()
+      z *= 0.75
+      if QPointF.dotProduct(z, z) < 50.0**2:
+        # Don't pull nodes that are already close
+        continue
+
+      self.drag_start(other)
+      
+      other.setPos(z + node.pos())
+
+      self.drag_move(other)
+      self.drag_stop(other)      
+
+  def node_lines(self, idx):
+    return {
+      ab: QLineF(self.nodes[ab[0]].pos(), self.nodes[ab[1]].pos())
+      for ab in self.node2lines[idx] }
+
+  def line_pen(self, ab):
+    return black_pen if ab in self.line_coll.free else gray_pen
+
+  def find_solved(self):
+    for i,lines in enumerate(self.node2lines):
+      solved = False
+      for ab in lines:
+        if ab not in self.line_coll.free:
+          break
+      else:
+        solved = True
+      if self.nodes[i]._solved != solved:
+        self.nodes[i]._solved = solved
+        yield i
+
+  def drag_start(self, node):
+    lc = self.node_lines(node.idx)
+    self.line_coll.move_begin(lc)
+
+  def drag_move(self, node):
+    lc = self.node_lines(node.idx)
+    for ab, ln in lc.items():
+      self.lines[ab].setLine(ln)
+
+    new_gray, new_free = self.line_coll.move_update(lc)
+
+    for ab in new_free:
+      self.lines[ab].setPen(black_pen)
+    for ab in new_gray:
+      self.lines[ab].setPen(gray_pen)
+
+    if new_free or new_gray:
+      for i in self.find_solved():
+        self.nodes[i].updateBrushes()
+
+    self.progress.emit(len(self.line_coll.free), len(self.lines))
+
+  def drag_stop(self, node):
+    self.line_coll.move_stop()
+    for i in self.find_solved():
+      self.nodes[i].updateBrushes()
 
   def hover(self, node, onoff):
     self.z_count += 0.01
@@ -434,7 +567,7 @@ class Scene(QGraphicsScene):
       if onoff:
         line.setPen(thick_pen)
       else:
-        line.setPen(black_pen if ab in self.untangled else gray_pen)
+        line.setPen(self.line_pen(ab))
 
     node._hover = onoff
     node.updateBrushes()
@@ -443,94 +576,10 @@ class Scene(QGraphicsScene):
       other.setZValue(self.z_count)
       other.updateBrushes()
 
-  def gravity(self, node):
-    for other in self.neighbors(node):
-      z = other.pos() - node.pos()
-      z *= 0.9
-      if QPointF.dotProduct(z, z) < 30.0**2:
-        # Only pull nodes that are further away than 3x diameter of nodes.
-        continue
-      other.setPos(z + node.pos())
-      self.updateNode(other)
-
-  def getCollisions(self, ab):
-    linef = self.lines[ab].line()
-    for xy,l in self.lines.items():
-      if ab[0] in xy or ab[1] in xy:
-        continue
-      typ, pt = linef.intersects(self.lines[xy].line())
-      if typ == QLineF.BoundedIntersection:
-        yield xy
-      
-  def updateNode(self, node):
-    # Check this node's edges to remove any potential collisions.
-    for ab in self.node2lines[node.idx]:
-      a,b = ab
-      self.lines[ab].setLine(QLineF(self.nodes[a].pos(), self.nodes[b].pos()))
-      coll = set(self.getCollisions(ab))
-
-      # log.debug("Collisions for line %s: %s", str(ab), str(list(sorted(coll))))
-      # log.debug("Previous collisions       : %s", str(list(sorted(self.collisions.get(ab,set())))))
-
-      # Check previous collisions.
-      for xy in self.collisions.get(ab, ()):
-        if xy in coll:
-          # Collision we've already seen.
-          continue
-        # Remove collision.
-        #log.debug("Removing %s-%s", str(xy), str(ab))
-        self.collisions[xy].remove(ab)
-        if len(self.collisions[xy]) == 0:
-          log.debug("Is now collision free: %s", str(xy))
-          del self.collisions[xy]
-          self.untangled.add(xy)
-          self.lines[xy].setPen(black_pen)
-      # We'll set pen on unhover.
-      if len(coll) > 0:
-        self.collisions[ab] = coll
-        if ab in self.untangled:
-          self.untangled.remove(ab)
-        for xy in coll:
-          if xy not in self.collisions:
-            log.debug("Tangling up %s", str(xy))
-            self.untangled.remove(xy)
-            self.collisions[xy] = set()
-            self.lines[xy].setPen(gray_pen)
-          self.collisions[xy].add(ab)
-      elif ab in self.collisions:
-        del self.collisions[ab]
-        self.untangled.add(ab)
-    # log.debug("%.2f%% untangled", 100.0 * len(self.untangled)/float(len(self.lines)))
-
-    for i,lines in enumerate(self.node2lines):
-      solved = False
-      for ab in lines:
-        if ab in self.collisions:
-          break
-      else:
-        solved = True
-      if self.nodes[i]._solved != solved:
-        self.nodes[i]._solved = solved
-        self.nodes[i].updateBrushes()
-    
-    self.progress.emit(len(self.untangled), len(self.lines))
-
-    # # Sanity checking.
-    # for x in self.lines.keys():
-    #   if x in self.collisions:
-    #     assert x not in self.untangled, "x:%s" % str(x)
-    #   elif x in self.untangled:
-    #     assert x not in self.collisions, "x:%s" % str(x)
-    #   else:
-    #     assert False, "x:%s isn't in anything" % str(x)
-
   def checkVictory(self):
     self.refit.emit()
-    if len(self.collisions) != 0:
-      return
-
-    # Victory!
-    self.victory.emit()
+    if len(self.line_coll.free) == len(self.lines):
+      self.victory.emit()
 
 
 class View(QGraphicsView):
@@ -659,7 +708,7 @@ class MainWindow(QMainWindow):
 
     n = 20 if len(inp) < 2 else int(inp[1])
     if n >= 1000:
-      if QMessageBox.question(self, "Warning!", "Graph generation might take a long time, continue?") != QMessageBox.Yes:
+      if QMessageBox.question(self, "Warning!", "Handling such a big graph could be laggy!<br />Continue?") != QMessageBox.Yes:
         return
     if n < 3 or n >= 20000:
       QMessageBox.warning(self, "Invalid Graph", f"Invalid <N>: {n}")
@@ -694,14 +743,43 @@ class MainWindow(QMainWindow):
     self.view.setBackgroundBrush(QBrush(QColor("blanchedalmond"), Qt.SolidPattern))
 
 
+def debug():
+  import time
+  v = [time.time()]
+  def _st():
+    v.append(time.time())
+    return v[-1] - v[-2]
+    
+  with state_file.open('rb') as f:
+    (pts,(edges,n2e)) = pickle.load(f)
+  pts = [QPointF(x,y) for x,y in pts]
+  LF = {(a,b): QLineF(pts[a], pts[b]) for a,b in edges}
+  print("load random", _st())
+  LineColl(LF)
+  print("DONE", _st())
 
+  G = RandomGraph3(1000)
+  pts = [QPointF(*(100.0*x)) for x in G._solution]
+  LF = {(a,b): QLineF(pts[a], pts[b]) for a,b in G.getEdges()[0]}
+  
+  print("load ordered", _st())
+  B = LineColl(LF)
+  print("DONE", _st())
+
+  print(len(B.free))
 
     
 def main():
+  if PERF_DEBUG:
+    debug()
+    return 0
   window = MainWindow(S)
   window.show()
   return app.exec_()
 
 if __name__ == '__main__':
   sys.exit(main())
+
+
+
 
