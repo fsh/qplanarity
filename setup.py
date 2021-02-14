@@ -5,7 +5,7 @@ from setuptools import setup
 setup(
   name='qplanarity',
   description='Puzzle game about untangling graphs',
-  version='1.2.0',
+  version='1.2.1',
 
   long_description_content_type='text/markdown', # when is text/org going to be supported pls thx
   long_description=open('README.md', 'r').read(),

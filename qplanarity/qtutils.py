@@ -44,6 +44,16 @@ class FColorVar(FValueVar):
   def convert(self, val):
     return QColor(val)
 
+class FBoolVar(FValueVar):
+  onValue = pyqtSignal(bool)
+
+  def convert(self, val):
+    if isinstance(val, str):
+      return False if not val or val.lower() == 'false' else True
+    if isinstance(val, (bool, int)):
+      return val
+    raise TypeError(f'invalid type given for bool variable {type(val)}')
+
 
 class FSettings(QSettings):
   def __init__(self, *args, appname=None, filename=None, **kwargs):
@@ -68,6 +78,8 @@ class FSettings(QSettings):
       obj = FIntVar(parent, name, actual)
     elif isinstance(val, QColor):
       obj = FColorVar(parent, name, actual)
+    elif isinstance(val, bool):
+      obj = FBoolVar(parent, name, actual)
     else:
       raise RuntimeError(f'unknown type {type(val)} for {name}')
 
@@ -122,6 +134,12 @@ class FLayout(QBoxLayout):
       return QBoxLayout.LeftToRight
     return QBoxLayout.TopToBottom
 
+
+class FCheckBox(QCheckBox):
+  def __init__(self, fvar, *args, **kwargs):
+    self.fvar = fvar
+    super().__init__(*args, checked=fvar.get(), **kwargs)
+    self.clicked[bool].connect(fvar.set)
 
 class ColorButton(QPushButton):
   def __init__(self, fvar, *args, **kwargs):

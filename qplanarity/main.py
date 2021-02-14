@@ -20,7 +20,7 @@ log = logging.getLogger('main')
 
 PERF_DEBUG = False
 
-from .qtutils import FSettings, FLayout, ColorButton
+from .qtutils import FSettings, FLayout, ColorButton, FCheckBox
 
 
 class PlanarityApp(QApplication):
@@ -39,7 +39,10 @@ defaults = {
       'solved': QColor('#e7d08b'),
     },
     'size': 24,
-  }
+  },
+  'ui': {
+    'zoom': True,
+  },
 }
 
 S = FSettings(appname='qplanarity')
@@ -662,6 +665,8 @@ class View(QGraphicsView):
       super().mousePressEvent(evt)
     
   def wheelEvent(self, evt):
+    if not S['ui/zoom'].get():
+      return
     factor = 1.2
     if evt.angleDelta().y() < 0:
       factor = 1.0 / factor
@@ -699,6 +704,8 @@ class PlanaritySettings(QDialog):
         ["Normal balls", ColorButton(S['node/color/normal'])],
         ["Touched balls", ColorButton(S['node/color/hover'])],
         ["Untangled balls", ColorButton(S['node/color/solved'])],
+        20,
+        [FCheckBox(S['ui/zoom'], text='Enable zoom (mouse wheel)')],
       ]))
 
     vis_action = QAction("Options", shortcut="Ctrl+O", checkable=True,
@@ -739,6 +746,8 @@ class MainWindow(QMainWindow):
   def __init__(self, S, *args):
     super().__init__(*args, windowTitle="QPLanarity")
 
+    self.setContextMenuPolicy(Qt.NoContextMenu)
+    
     self.S = S
     sett_window = PlanaritySettings(S)
     self._options = sett_window
@@ -746,15 +755,15 @@ class MainWindow(QMainWindow):
     self.a_quit = QAction("Quit", shortcut="Ctrl+Q", triggered=self.close)
     self.a_newgame = QAction("New Game", shortcut="Ctrl+N", triggered=self.newGame)
     self.a_autoresize = QAction(
-      "Autoresize",
+      "Autocenter",
       shortcut="Ctrl+R",
       checkable=True,
       checked=True)
     tb = QToolBar(toolButtonStyle=Qt.ToolButtonTextOnly)
     tb.addAction(self.a_newgame)
-    tb.addAction(self.a_quit)
-    tb.addAction(self._options.visAction)
     tb.addAction(self.a_autoresize)
+    tb.addAction(self._options.visAction)
+    tb.addAction(self.a_quit)
     self.addToolBar(tb)
 
     self.statusBar().showMessage(" ")
