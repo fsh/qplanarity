@@ -737,7 +737,7 @@ about_text = """
 
 class MainWindow(QMainWindow):
   def __init__(self, S, *args):
-    super().__init__(*args, windowTitle="QPLanarity")
+    super().__init__(*args, windowTitle="QPlanarity")
 
     self.setContextMenuPolicy(Qt.NoContextMenu)
     
