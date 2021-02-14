@@ -20,7 +20,7 @@ log = logging.getLogger('main')
 
 PERF_DEBUG = False
 
-from .qtutils import FSettings, FLayout, ColorButton, FCheckBox
+from .qtutils import FSettings, FLayout, ColorButton, FCheckBox, FComboBox
 
 
 class PlanarityApp(QApplication):
@@ -42,6 +42,7 @@ defaults = {
   },
   'ui': {
     'zoom': True,
+    'graphtype': (0, ['Delaunay', 'Melange']),
   },
 }
 
@@ -696,6 +697,9 @@ class PlanaritySettings(QDialog):
         ["Untangled balls", ColorButton(S['node/color/solved'])],
         20,
         [FCheckBox(S['ui/zoom'], text='Enable zoom (mouse wheel)')],
+        20,
+        ["Graph generation algorithm", FComboBox(S['ui/graphtype'])],
+        ["""Delaunay generates "nicer" and more regular graphs. Melange generates more "lopsided" graphs that can become pathological and harder to make planar.\n"""],
       ]))
 
     vis_action = QAction("Options", shortcut="Ctrl+O", checkable=True,
@@ -714,17 +718,16 @@ class PlanaritySettings(QDialog):
     
 
 
-newgame_text = """
-Enter game parameters.
+newgame_text = """Enter number of vertices in graph.
 
-Two graph generation modes currently exist:
-delaunay N
-melange N
+A reasonable number is probably in the range 8 to 100.
 
-Delaunay graphs are more regular and can be easier. Melange graphs can
-be much more lopsided and might require more fiddling to make planar.
-Both options only take a single parameter, namely the number of of
-desired nodes in the graph."""
+A higher number doesn't necessarily mean it will be harder, just more
+time-consuming, like a larger jigsaw puzzle. For example, anything
+larger than 500 is likely to take several hours even if you're
+experienced with playing planarity. The algorithm currently selected
+in options will determine how the graph is generated.
+"""
 
 
 about_text = """
@@ -794,27 +797,29 @@ Ctrl+R = Toggle autocenter
       pickle.dump((pts,self._graph), f)
 
   def newGame(self):
-    inp, ok = QInputDialog.getText(self, "New Game", newgame_text, text="delaunay 20")
+    inp, ok = QInputDialog.getText(self, "New Game", newgame_text, text="10")
     if not ok:
-      return
-    inp = inp.split()
-
-    if len(inp) == 0 or inp[0] not in ('delaunay', 'melange'):
-      QMessageBox.warning(self, "Invalid Graph", f"Invalid graph type: '{inp[0] if inp else ''}'\nMust be one of 'delaunay' or 'melange'.")
-      return
-
-    n = 20 if len(inp) < 2 else int(inp[1])
-    if n >= 1000:
-      if QMessageBox.question(self, "Warning!", "Handling such a big graph could be laggy!<br />Continue?") != QMessageBox.Yes:
-        return
-    if n < 3 or n >= 20000:
-      QMessageBox.warning(self, "Invalid Graph", f"Invalid <N>: {n}")
       return
 
     try:
-      assert inp[0] in ['delaunay', 'melange', '']
-      g = RandomGraph3(n) if inp[0] == 'delaunay' else RandomGraph2(n)
+      n = int(inp)
+    except ValueError:
+      QMessageBox.warning(self, "Integer Error", f"Invalid number: {inp}")
+      return
+
+    if n < 4 or n > 10000:
+      QMessageBox.warning(self, "Integer Error", f"The number should be in the range 4-10000")
+      return
+    if n >= 1000:
+      if QMessageBox.question(self, "Warning!", "Handling such a big graph could be laggy!<br />Continue?") != QMessageBox.Yes:
+        return
+
+    graphtype = S['ui/graphtype'].choice()
+    assert graphtype in ['Delaunay', 'Melange']
+    try:
+      g = RandomGraph3(n) if graphtype == 'Delaunay' else RandomGraph2(n)
     except Exception as e:
+      QMessageBox.warning(self, "Graph Error", f"Exception while trying to generate graph!\n{str(e)}")
       log.warning(f"Error generating graph: {str(e)}")
       return
     self._graph = g.getEdges()

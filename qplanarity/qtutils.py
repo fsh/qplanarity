@@ -37,6 +37,7 @@ class FIntVar(FValueVar):
 
   def convert(self, val):
     return int(val)
+  
 
 class FColorVar(FValueVar):
   onValue = pyqtSignal(QColor)
@@ -44,6 +45,7 @@ class FColorVar(FValueVar):
   def convert(self, val):
     return QColor(val)
 
+  
 class FBoolVar(FValueVar):
   onValue = pyqtSignal(bool)
 
@@ -53,6 +55,30 @@ class FBoolVar(FValueVar):
     if isinstance(val, (bool, int)):
       return val
     raise TypeError(f'invalid type given for bool variable {type(val)}')
+
+
+class FChoiceVar(FValueVar):
+  onValue = pyqtSignal(int)
+  
+  def __init__(self, parent, name, val, choices):
+    self._choices = list(choices)
+    super().__init__(parent, name, val)
+
+  def choices(self):
+    return self._choices
+
+  def choice(self):
+    return self._choices[self._value]
+
+  def convert(self, val):
+    try:
+      return self._choices.index(val)
+    except ValueError:
+      pass
+    val = int(val)
+    if not (0 <= val < len(self._choices)):
+      raise ValueError(f'{val} neither an index nor value in {self._choices}')
+    return val
 
 
 class FSettings(QSettings):
@@ -72,9 +98,15 @@ class FSettings(QSettings):
     if isinstance(val, dict):
       return self.createGroup(parent, name, val)
 
+    extra = None
+    if isinstance(val, tuple):
+      val, extra = val
+
     actual = self.value(name) if self.contains(name) else val
 
-    if isinstance(val, int):
+    if isinstance(val, int) and isinstance(extra, (list, tuple)):
+      obj = FChoiceVar(parent, name, actual, extra)
+    elif isinstance(val, int) and extra is None:
       obj = FIntVar(parent, name, actual)
     elif isinstance(val, QColor):
       obj = FColorVar(parent, name, actual)
@@ -101,9 +133,6 @@ class FSettings(QSettings):
       obj.onChange.connect(self.varChanged)
 
 
-
-
-
 class FLayout(QBoxLayout):
   def __init__(self, tree, *args, direction=QBoxLayout.TopToBottom):
     super().__init__(direction, *args)
@@ -116,7 +145,10 @@ class FLayout(QBoxLayout):
 
   def addStuff(self, x, stretch=0):
     if isinstance(x, str):
-      self.addWidget(QLabel(x), stretch)
+      if '\n' in x:
+        self.addWidget(QLabel(x.strip(), wordWrap=True, openExternalLinks=True))
+      else:
+        self.addWidget(QLabel(x), stretch)
     elif isinstance(x, list):
       self.addLayout(FLayout(x, direction=self.dualLayout()), stretch)
     elif isinstance(x, int):
@@ -126,7 +158,6 @@ class FLayout(QBoxLayout):
     elif isinstance(x, QLayout):
       self.addLayout(x, stretch)
     else:
-
       self.addWidget(x, stretch)
 
   def dualLayout(self):
@@ -140,6 +171,17 @@ class FCheckBox(QCheckBox):
     self.fvar = fvar
     super().__init__(*args, checked=fvar.get(), **kwargs)
     self.clicked[bool].connect(fvar.set)
+
+
+class FComboBox(QComboBox):
+  def __init__(self, fvar, *args, **kwargs):
+    self.fvar = fvar
+    super().__init__(*args, **kwargs)
+
+    self.addItems(fvar.choices())
+    self.setCurrentIndex(fvar.get())
+    self.currentIndexChanged.connect(fvar.set)
+
 
 class ColorButton(QPushButton):
   def __init__(self, fvar, *args, **kwargs):
