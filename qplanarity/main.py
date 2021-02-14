@@ -646,21 +646,14 @@ class View(QGraphicsView):
       return
     margins = QMarginsF(30.0, 30.0, 30.0, 30.0)
     ib = self.scene().itemsBoundingRect()
-    #print(self.scene().sceneRect())
-    #print("ib", ib, "YES" if evt is None else "NO")
     self.scene().setSceneRect(ib.marginsAdded(margins * 100))
-    #print("scenerect", self.scene().sceneRect())
     self.fitInView(ib.marginsAdded(margins), Qt.KeepAspectRatio)
 
 
   def mousePressEvent(self, evt):
-    if evt.button() == Qt.RightButton:
+    if evt.button() == Qt.LeftButton:
       self.setDragMode(QGraphicsView.ScrollHandDrag)
       super().mousePressEvent(evt)
-      if evt.isAccepted():
-        return
-      fake = QMouseEvent(QEvent.MouseButtonPress, QPointF(evt.pos()), Qt.LeftButton, evt.buttons(), Qt.KeyboardModifiers())
-      super().mousePressEvent(fake)
     else:
       super().mousePressEvent(evt)
     
@@ -679,12 +672,9 @@ class View(QGraphicsView):
     evt.accept()
 
   def mouseReleaseEvent(self, evt):
-    if evt.button() == Qt.RightButton:
-      fake = QMouseEvent(QEvent.MouseButtonRelease, QPointF(evt.pos()),
-                         Qt.LeftButton, evt.buttons(), Qt.KeyboardModifiers())
-      super().mouseReleaseEvent(fake)
-      self.setDragMode(QGraphicsView.RubberBandDrag)
     super().mouseReleaseEvent(evt)
+    if evt.button() == Qt.LeftButton:
+      self.setDragMode(QGraphicsView.RubberBandDrag)
 
 
 class PlanaritySettings(QDialog):
@@ -771,13 +761,17 @@ class MainWindow(QMainWindow):
     self.setCentralWidget(QLabel("""
 Welcome to QPlanarity!
 
-Left mouse: drag (when hovering a ball), or select multiple balls
-Right mouse: pull adjacent balls (when hovering), or pan the scene
+Left mouse button: drag ball or scene
+
+Right mouse button: multiselect
+Right mouse button on ball: pull adjacent ball closer
+
 Mouse wheel: zoom in and out
 
-Ctrl+N = New Game
+Ctrl+N = New game
 Ctrl+Q = Quit
 Ctrl+O = Options
+Ctrl+R = Toggle autocenter
 
 """))
 
