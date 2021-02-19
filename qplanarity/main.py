@@ -548,9 +548,8 @@ class Scene(QGraphicsScene):
       self._grp = None
     
       diff = planar_graph_diff(self._pg)
-      delta = node.pos() - self._grppos
       for n in _grp:
-        self.update_node_and_vertex(n.idx, n.pos() + delta)
+        self.update_node_and_vertex(n.idx, n.pos())
       self.apply_changes(diff)
 
     self.notify_updated()
