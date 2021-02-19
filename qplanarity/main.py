@@ -16,7 +16,7 @@ import numpy as np
 # This is only used for delaunay graph generation
 from scipy.spatial import Delaunay
 
-__version__ = '1.4.1'
+__version__ = '1.4.2'
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
@@ -29,7 +29,7 @@ from .linalg import random_circle_points, planar_graph, planar_graph_diff
 class PlanarityApp(QApplication):
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
-    self.setOrganizationName('qplanarity')
+    self.setApplicationName('qplanarity')
 
 app = PlanarityApp(sys.argv)
 
@@ -40,7 +40,7 @@ defaults = {
       'hover': QColor('darkorange'), # QColor('darkorange'),
       'solved': QColor('crimson'), # QColor('darksalmon'),
     },
-    'size': 24,
+    'size': 16,
   },
   'ui': {
     'autofit': False,
@@ -69,12 +69,12 @@ state_file = config_path / 'qplanarity14.state'
 # magenta_brush = QBrush(Qt.magenta, Qt.SolidPattern)
 black_pen = QPen(Qt.black)
 thick_pen = QPen(Qt.black)
-gray_pen = QPen(Qt.gray)
+gray_pen = QPen(QColor('#888'))
 for pen in [black_pen, thick_pen, gray_pen]:
   pen.setCosmetic(True)
 thick_pen.setWidthF(4.0)
 gray_pen.setWidthF(2.0)
-black_pen.setWidthF(2.0)
+black_pen.setWidthF(3.0)
 
 
 import dataclasses
@@ -587,7 +587,7 @@ class View(QGraphicsView):
     super().__init__(*args)
     self.S = S
 
-    S['ui/autofit'].onValue.connect(lambda x: x and self.resizeEvent(None))
+    S['ui/autofit'].onValue.connect(self.refit)
     self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -595,17 +595,21 @@ class View(QGraphicsView):
     self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
     
     self.setScene(scene)
-    scene.refit.connect(lambda: self.resizeEvent(None), Qt.QueuedConnection)
+    scene.refit.connect(self.refit, Qt.QueuedConnection)
 
     self.setDragMode(QGraphicsView.RubberBandDrag)
+    self.refit(True)
 
-  def resizeEvent(self, evt):
-    if not self.S['ui/autofit'].get():
+  def refit(self, force=False):
+    if not (force or self.S['ui/autofit'].get()):
       return
     margins = QMarginsF(30.0, 30.0, 30.0, 30.0)
     ib = self.scene().itemsBoundingRect()
     self.scene().setSceneRect(ib.marginsAdded(margins * 200))
     self.fitInView(ib.marginsAdded(margins), Qt.KeepAspectRatio)
+
+  def resizeEvent(self, evt):
+    self.refit()
 
   def mousePressEvent(self, evt):
     if evt.button() == Qt.LeftButton:
@@ -689,11 +693,34 @@ experienced with playing planarity. The algorithm currently selected
 in options will determine how the graph is generated.
 """
 
+welcome_text = """
+Welcome to QPlanarity!
 
-about_text = """
+Left mouse button: drag ball or scene
 
+Right mouse button: multiselect
+Right mouse button on ball: pull adjacent ball closer
+
+Mouse wheel: zoom in and out
+
+Ctrl+N = New game
+Ctrl+Q = Quit
+Ctrl+O = Options
+Ctrl+R = Toggle autocenter
 
 """
+
+about_text = f"""
+<h1>QPlanarity <small>(v.{__version__})</small></h1>
+<p><b>By Frank S. Hestvik (tristesse@gmail.com)</b></p>
+
+<p>Inspired by an old Flash web game called Planarity. Made with
+PyQt5.</p>
+
+<p>Special credits to <i>poiko</i> and <i>Jean3tte</i> for being the
+only people who might read this text.</p>
+"""
+
 
 class MainWindow(QMainWindow):
   def __init__(self, S, *args):
@@ -717,22 +744,7 @@ class MainWindow(QMainWindow):
 
     self.statusBar().showMessage(" ")
     self.view = None
-    self.setCentralWidget(QLabel("""
-Welcome to QPlanarity!
-
-Left mouse button: drag ball or scene
-
-Right mouse button: multiselect
-Right mouse button on ball: pull adjacent ball closer
-
-Mouse wheel: zoom in and out
-
-Ctrl+N = New game
-Ctrl+Q = Quit
-Ctrl+O = Options
-Ctrl+R = Toggle autocenter
-
-"""))
+    self.setCentralWidget(QLabel(welcome_text))
 
     if state_file.is_file():
       try:
@@ -742,17 +754,22 @@ Ctrl+R = Toggle autocenter
         log.warning(f"exception hit while trying to load previous state: {e}")
       else:
         self.init(self._graph)
+    else:
+      self._graph = None
+
+    # Autosave every 3 minutes.
+    self._autosave_timer = QTimer(interval=180_000, timeout=self.autosave)
+    self._autosave_timer.start()
+
+  def autosave(self):
+    if not self._graph:
+      return
+    log.info(f"Saving state to {state_file}")
+    with state_file.open('wb') as f:
+      pickle.dump(self._graph, f)
 
   def about(self):
-    QMessageBox.about(self, "About QPlanarity", f"""
-<h1>QPlanarity <small>(v.{__version__})</small></h1>
-<p><b>By Frank S. Hestvik (tristesse@gmail.com)</b></p>
-
-<p>Inspired by an old Flash web game called Planarity. Made with
-PyQt5.</p>
-
-<p>Special credits to <i>poiko</i> and <i>Jean3tte</i> for being the
-only people who might read this text.</p>""")
+    QMessageBox.about(self, "About QPlanarity", about_text)
 
   def closeEvent(self, evt):
     self._options.close()

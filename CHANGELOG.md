@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.2 - 2021-02-19
+- Fixed a bug with moving multiple nodes.
+- Moved autocenter/autofit from toolbar to options and set its default
+  to False.
+- Exposed background color options.
+- Implemented auto-save in case of crash.
+- Changed some defaults.
+
 ## 1.4.1 - 2021-02-19
 - Added an About dialog.
 
