@@ -11,9 +11,12 @@ import math
 from pathlib import Path
 import pickle
 
-# These two are only used for Graph3 generation.
 import numpy as np
+
+# This is only used for delaunay graph generation
 from scipy.spatial import Delaunay
+
+__version__ = '1.4.1'
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(filename)s %(funcName)s:%(lineno)s %(levelname)s %(message)s")
 log = logging.getLogger('main')
@@ -703,10 +706,12 @@ class MainWindow(QMainWindow):
       shortcut="Ctrl+R",
       checkable=True,
       checked=True)
+    self.a_about = QAction("About", triggered=self.about)
     tb = QToolBar(toolButtonStyle=Qt.ToolButtonTextOnly)
     tb.addAction(self.a_newgame)
     tb.addAction(self.a_autoresize)
     tb.addAction(self._options.visAction)
+    tb.addAction(self.a_about)
     tb.addAction(self.a_quit)
     self.addToolBar(tb)
 
@@ -737,6 +742,17 @@ Ctrl+R = Toggle autocenter
         log.warning(f"exception hit while trying to load previous state: {e}")
       else:
         self.init(self._graph)
+
+  def about(self):
+    QMessageBox.about(self, "About QPlanarity", f"""
+<h1>QPlanarity <small>(v.{__version__})</small></h1>
+<p><b>By Frank S. Hestvik (tristesse@gmail.com)</b></p>
+
+<p>Inspired by an old Flash web game called Planarity. Made with
+PyQt5.</p>
+
+<p>Special credits to <i>poiko</i> and <i>Jean3tte</i> for being the
+only people who might read this text.</p>""")
 
   def closeEvent(self, evt):
     self._options.close()

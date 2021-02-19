@@ -9,5 +9,5 @@
 - [X] Save state in home config.
 - [X] Options for colors etc.
 - [X] Move graph generation to options, better 'new game' dialog.
-- [ ] About dialog?
+- [X] About dialog?
 - [X] Save line_coll.free data so loading large solved graphs isn't awful.

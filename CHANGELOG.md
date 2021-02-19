@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.1 - 2021-02-19
+- Added an About dialog.
+
 ## 1.4.0 - 2021-02-19
 - Rewrote line intersect detection again. Now much faster overall, and
   instant when loading previous state.
