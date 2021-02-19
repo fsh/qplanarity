@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 - 2021-02-19
+- Rewrote line intersect detection again. Now much faster overall, and
+  instant when loading previous state.
+- Node solve status is checked dynamically.
+- Victory condition is checked dynamically.
+- Cleaned up some parts of the code.
+- Changed default colors.
+
 ## 1.3.0 - 2021-02-14
 - Graph selection algorithm moved to options.
 - New game window is now much more sane.

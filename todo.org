@@ -10,4 +10,4 @@
 - [X] Options for colors etc.
 - [X] Move graph generation to options, better 'new game' dialog.
 - [ ] About dialog?
-- [ ] Save line_coll.free data so loading large solved graphs isn't awful.
+- [X] Save line_coll.free data so loading large solved graphs isn't awful.

@@ -21,28 +21,31 @@ log = logging.getLogger('main')
 PERF_DEBUG = False
 
 from .qtutils import FSettings, FLayout, ColorButton, FCheckBox, FComboBox
-
+from .linalg import random_circle_points, planar_graph, planar_graph_diff
 
 class PlanarityApp(QApplication):
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self.setOrganizationName('qplanarity')
-    self.setApplicationName('qplanarity')
 
 app = PlanarityApp(sys.argv)
 
 defaults = {
   'node': {
     'color': {
-      'normal': QColor('#2244bb'),
-      'hover': QColor('#5b9fff'),
-      'solved': QColor('#e7d08b'),
+      'normal': QColor('#2244bb'), # QColor('crimson'),
+      'hover': QColor('darkorange'), # QColor('darkorange'),
+      'solved': QColor('crimson'), # QColor('darksalmon'),
     },
     'size': 24,
   },
   'ui': {
     'zoom': True,
     'graphtype': (0, ['Delaunay', 'Melange']),
+    'background': {
+      'normal': QColor('blanchedalmond'),
+      'solved': QColor('wheat'),
+    },
   },
 }
 
@@ -54,12 +57,12 @@ config_path = Path(QStandardPaths.writableLocation(QStandardPaths.AppConfigLocat
 if not config_path.exists():
   config_path.mkdir(parents=True)
 
-state_file = config_path / 'qplanarity.state'
+state_file = config_path / 'qplanarity14.state'
 
 
-blue_brush = QBrush(Qt.blue, Qt.SolidPattern)
-red_brush = QBrush(Qt.red, Qt.SolidPattern)
-magenta_brush = QBrush(Qt.magenta, Qt.SolidPattern)
+# blue_brush = QBrush(Qt.blue, Qt.SolidPattern)
+# red_brush = QBrush(Qt.red, Qt.SolidPattern)
+# magenta_brush = QBrush(Qt.magenta, Qt.SolidPattern)
 black_pen = QPen(Qt.black)
 thick_pen = QPen(Qt.black)
 gray_pen = QPen(Qt.gray)
@@ -293,20 +296,20 @@ class Node(QGraphicsEllipseItem):
   def __init__(self, idx, *args):
     super().__init__(-12.0, -12.0, 24.0, 24.0, *args)
     self.idx = idx
-    self.setBrush(blue_brush)
     self.setAcceptHoverEvents(True)
     self.setZValue(1.0)
     self.setFlags(QGraphicsItem.ItemIgnoresTransformations
                   | QGraphicsItem.ItemIsSelectable)
     self._hover = False
-    self._solved = False
 
   def hoverEnterEvent(self, evt):
     log.debug("(%d) Enter hover", self.idx)
+    self._hover = True
     self.scene().hover(self, True)
   
   def hoverLeaveEvent(self, evt):
     log.debug("(%d) Leave hover", self.idx)
+    self._hover = False
     self.scene().hover(self, False)
 
   def mousePressEvent(self, evt):
@@ -321,39 +324,6 @@ class Node(QGraphicsEllipseItem):
   def mouseReleaseEvent(self, evt):
     self.scene().drag_stop(self)
 
-  def updateBrushes(self):
-    if not (scene := self.scene()):
-      return
-    if self._hover:
-      self.setBrush(scene._brush_hover)
-    elif self._solved:
-      self.setBrush(scene._brush_solved)
-    else:
-      self.setBrush(scene._brush_normal)
-    
-    self.setRect(scene._node_rect)
-    
-  def setSolved(self, flag):
-    self._solved = flag
-    self.updateBrushes()
-
-
-def random_circle_points(n):
-  # # Find a number close to the square root of n that is coprime with n and use
-  # # linear congruence.
-  # a = int(math.sqrt(n))
-  # while math.gcd(a,n) > 1:
-  #   a += 1
-  # for i in range(n):
-  #   ri = (a*i + 0xbabe) % n
-  #   yield 200.0 * QPointF(math.cos(2*math.pi*ri/n),
-  #                         math.sin(2*math.pi*ri/n))
-
-  # Do it the simple way instead.
-  pts = [200.0 * QPointF(math.cos(i*math.tau/n),
-                         math.sin(i*math.tau/n)) for i in range(n)]
-  rnd.shuffle(pts)
-  return pts
 
 
 
@@ -448,100 +418,111 @@ class Scene(QGraphicsScene):
   def __init__(self, settings, *args):
     super().__init__(*args)
     self.nodes = []
-    self.lines = dict()
-    self.node2lines = dict()
+    self.lines = []
     self.z_count = 1.0
     
     self.S = settings
-    self.S['node'].onChange.connect(self.updateBrushes)
-    self.updateBrushes()
+    self.S['node/color'].onChange.connect(self.update_brushes)
+    self.S['node/size'].onValue.connect(self.update_rects)
+    self.S['ui/background'].onChange.connect(self.update_bg)
+    self.update_brushes()
     self._grp = None
 
-  def updateBrushes(self):
+  def update_brushes(self):
     self._brush_normal = QBrush(self.S['node/color/normal'].get(), Qt.SolidPattern)
     self._brush_hover = QBrush(self.S['node/color/hover'].get(), Qt.SolidPattern)
     self._brush_solved = QBrush(self.S['node/color/solved'].get(), Qt.SolidPattern)
-    radius = float(self.S['node/size'].get())
-    self._node_rect = QRectF(-radius, -radius, radius*2, radius*2)
+    for i in range(len(self.nodes)):
+      self.update_node_brush(i)
+
+  def update_rects(self, radius):
+    node_rect = QRectF(-radius, -radius, radius*2, radius*2)
     for n in self.nodes:
-      n.updateBrushes()
+      n.setRect(node_rect)
 
-  def init(self, edges, node2lines, pt_list):
+  def update_bg(self):
+    color = self.S['ui/background/solved'].get() if self._pg.is_planar() else self.S['ui/background/normal'].get()
+    if self.backgroundBrush().color() == color:
+      # Do nothing.
+      return
+
+    self.setBackgroundBrush(QBrush(color, Qt.SolidPattern))
+    self.invalidate(QRectF(-1000,-1000,5000,5000), QGraphicsScene.BackgroundLayer)
+
+  def init(self, pg):
     self.clear()
-    n = len(node2lines)
 
-    self.nodes = []
-    for i, pt in enumerate(pt_list):
-      obj = Node(i)
-      obj.setPos(pt)
-      self.nodes.append(obj)
+    self._pg = pg
 
-    linedict = {(a,b): QLineF(pt_list[a], pt_list[b]) for a,b in edges}
-
-    self.line_coll = LineColl(linedict)
-
-    self.lines = lines = dict()
-    for ab, ln in linedict.items():
-      lines[ab] = self.addLine(ln, self.line_pen(ab))
-
-    # Now add the nodes.
-    for i in range(n):
-      self.addItem(self.nodes[i])
-
-    self.node2lines = node2lines
     self.z_count = 1.0
     self._grp = None
+    self._finished = False
 
-  def postInit(self):
-    list(self.find_solved())
+    self.nodes = []
+    for i, pt in enumerate(pg.vertices):
+      obj = Node(i)
+      obj.setPos(*pt)
+      self.nodes.append(obj)
+      self.addItem(obj)
 
-    self.updateBrushes()
-    if len(self.line_coll.free) == len(self.lines):
-      self.victory.emit()
+    self.lines = []
+    for i,ln in enumerate(pg.lines):
+      self.lines.append(self.addLine(*ln[0], *ln[1], self.line_pen(i)))
 
-  def neighbors(self, node):
-    for (a,b) in self.node2lines[node.idx]:
-      yield self.nodes[a+b-node.idx]
+    self.update_bg()
+    self.update_brushes()
+    self.update_rects(self.S['node/size'].get())
+
+  def line_pen(self, i):
+    "QPen to use for line `i`."
+    return black_pen if self._pg.is_line_untangled(i) else gray_pen
 
   def gravity(self, node):
-    for other in self.neighbors(node):
-      z = other.pos() - node.pos()
+    sz = self.S['node/size'].get()
+    diff = planar_graph_diff(self._pg)
+    
+    for other in self._pg.neighbors(node.idx ):
+      z = self._pg.vertices[other] - self._pg.vertices[node.idx]
       z *= 0.75
-      if QPointF.dotProduct(z, z) < 50.0**2:
+      if np.linalg.norm(z) < 3 * sz:
         # Don't pull nodes that are already close
         continue
 
-      self.drag_start(other)
+      self.update_node_and_vertex(other, self._pg.vertices[node.idx] + z)
 
-      self.drag_move(other, z + node.pos())
-      self.drag_stop(other)
+    self.apply_changes(diff)
+    self.notify_updated()
 
-  def node_lines(self, idx):
-    return {
-      ab: QLineF(self.nodes[ab[0]].pos(), self.nodes[ab[1]].pos())
-      for ab in self.node2lines[idx] }
+  def update_node_brush(self, i):
+    if self.nodes[i]._hover:
+      brush = self._brush_hover
+    elif self._pg.is_vertex_free(i):
+      brush = self._brush_solved
+    else:
+      brush = self._brush_normal
+    self.nodes[i].setBrush(brush)
 
-  def line_pen(self, ab):
-    return black_pen if ab in self.line_coll.free else gray_pen
+  def update_node_and_vertex(self, i, pos):
+    if isinstance(pos, QPointF):
+      pos = [pos.x(), pos.y()]
 
-  def find_solved(self):
-    for i,lines in enumerate(self.node2lines):
-      solved = False
-      for ab in lines:
-        if ab not in self.line_coll.free:
-          break
-      else:
-        solved = True
-      if self.nodes[i]._solved != solved:
-        self.nodes[i]._solved = solved
-        yield i
+    self._pg.update_vertex_pos(i, pos)  
+    self.nodes[i].setPos(*pos)
+    for l in self._pg.vertex_edges(i):
+      self.lines[l].setLine(*self._pg.lines[l][0], *self._pg.lines[l][1])
+  
+  def apply_changes(self, changes):
+    for n in changes.changed_vertices:
+      self.update_node_brush(n)
+    for l in changes.changed_edges:
+      self.lines[l].setPen(self.line_pen(l))
+
+    self.update_bg()
 
   def drag_start(self, node):
     sel = self.selectedItems()
     if node not in sel:
       self.clearSelection()
-      lc = self.node_lines(node.idx)
-      self.line_coll.move_begin(lc)
     else:
       self._grp = sel
       self._grppos = node.pos()
@@ -553,76 +534,48 @@ class Scene(QGraphicsScene):
         n.setPos(n.pos() + delta)
       return
 
-    node.setPos(pos)
-
-    lc = self.node_lines(node.idx)
-    for ab, ln in lc.items():
-      self.lines[ab].setLine(ln)
-
-    new_gray, new_free = self.line_coll.move_update(lc)
-
-    for ab in new_free:
-      self.lines[ab].setPen(black_pen)
-    for ab in new_gray:
-      self.lines[ab].setPen(gray_pen)
-
-    if new_free or new_gray:
-      for i in self.find_solved():
-        self.nodes[i].updateBrushes()
-
-    self.progress.emit(len(self.line_coll.free), len(self.lines))
-
-  def update_selection_drag(self, delta):
-    self.clearSelection()
-    _grp = self._grp
-    self._grp = None
-
-    for n in _grp:
-      n.setPos(n.pos() + delta)
-
-    for n in _grp:
-      self.drag_start(n)
-      self.drag_move(n, n.pos() - delta)
-      self.drag_stop(n)
-
-      for ab in self.node2lines[n.idx]:
-        line = self.lines[ab]
-        line.setPen(self.line_pen(ab))
-
+    diff = planar_graph_diff(self._pg)
+    self.update_node_and_vertex(node.idx, pos)
+    self.apply_changes(diff)
 
   def drag_stop(self, node):
     if self._grp:
-      self.update_selection_drag(self._grppos - node.pos())
-      return
+      self.clearSelection()
+      _grp = self._grp
+      self._grp = None
+    
+      diff = planar_graph_diff(self._pg)
+      delta = node.pos() - self._grppos
+      for n in _grp:
+        self.update_node_and_vertex(n.idx, n.pos() + delta)
+      self.apply_changes(diff)
 
-    self.line_coll.move_stop()
-    for i in self.find_solved():
-      self.nodes[i].updateBrushes()
+    self.notify_updated()
 
-    self.checkVictory()
-
-  def hover(self, node, onoff):
-    self.z_count += 0.01
-    others = self.node2lines[node.idx]
-    for ab in others:
-      line = self.lines[ab]
-      if onoff:
-        line.setPen(thick_pen)
-      else:
-        line.setPen(self.line_pen(ab))
-
-    node._hover = onoff
-    node.updateBrushes()
-    for other in self.neighbors(node):
-      other._hover = onoff
-      other.setZValue(self.z_count)
-      other.updateBrushes()
-
-  def checkVictory(self):
+  def notify_updated(self):
     self.refit.emit()
-    if len(self.line_coll.free) == len(self.lines):
+    prog = np.count_nonzero(self._pg.tangle_array == 0)
+    self.progress.emit(prog, len(self.lines))
+    if prog == len(self.lines) and not self._finished:
+      self._finished = True
       self.victory.emit()
+  
+  def hover(self, node, onoff):
+    # Hover highlight and raise associated nodes.
+    for other in self._pg.neighbors(node.idx):
+      self.nodes[other]._hover = onoff
+      self.nodes[other].setZValue(self.z_count)
+      self.update_node_brush(other)
 
+    self.update_node_brush(node.idx)
+    
+    if not onoff:
+      for l in self._pg.vertex_edges(node.idx):
+        self.lines[l].setPen(self.line_pen(l))
+    else:
+      self.z_count += 0.01
+      for l in self._pg.vertex_edges(node.idx):
+        self.lines[l].setPen(thick_pen)
 
 
 
@@ -634,7 +587,6 @@ class View(QGraphicsView):
     self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
 
     self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-    #self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
     
     self.setScene(scene)
     scene.refit.connect(lambda: self.resizeEvent(None), Qt.QueuedConnection)
@@ -647,9 +599,8 @@ class View(QGraphicsView):
       return
     margins = QMarginsF(30.0, 30.0, 30.0, 30.0)
     ib = self.scene().itemsBoundingRect()
-    self.scene().setSceneRect(ib.marginsAdded(margins * 100))
+    self.scene().setSceneRect(ib.marginsAdded(margins * 200))
     self.fitInView(ib.marginsAdded(margins), Qt.KeepAspectRatio)
-
 
   def mousePressEvent(self, evt):
     if evt.button() == Qt.LeftButton:
@@ -779,10 +730,13 @@ Ctrl+R = Toggle autocenter
 """))
 
     if state_file.is_file():
-      with state_file.open('rb') as f:
-        (pts,self._graph) = pickle.load(f)
-        self.init(*self._graph, [QPointF(x,y) for x,y in pts])
-
+      try:
+        with state_file.open('rb') as f:
+          self._graph = pickle.load(f)
+      except Exception as e:
+        log.warning(f"exception hit while trying to load previous state: {e}")
+      else:
+        self.init(self._graph)
 
   def closeEvent(self, evt):
     self._options.close()
@@ -790,11 +744,9 @@ Ctrl+R = Toggle autocenter
     if self.view is None:
       return
 
-    scene = self.view.scene()
-    pts = [(n.pos().x(), n.pos().y()) for n in scene.nodes]
-    log.info("Saving state to qplanarity.state")
+    log.info(f"Saving state to {state_file}")
     with state_file.open('wb') as f:
-      pickle.dump((pts,self._graph), f)
+      pickle.dump(self._graph, f)
 
   def newGame(self):
     inp, ok = QInputDialog.getText(self, "New Game", newgame_text, text="10")
@@ -822,27 +774,27 @@ Ctrl+R = Toggle autocenter
       QMessageBox.warning(self, "Graph Error", f"Exception while trying to generate graph!\n{str(e)}")
       log.warning(f"Error generating graph: {str(e)}")
       return
-    self._graph = g.getEdges()
-    self.init(*self._graph)
 
-  def init(self, edges, node2lines, pts=None):
+    edges, n2e = g.getEdges()
+    pts = random_circle_points(len(n2e), 200.0)
+    self._graph = planar_graph(pts, [[a,b] for a,b in edges])
+    self.init(self._graph)
+
+  def init(self, pg):
     scene = Scene(self.S)
-    if pts is None:
-      pts = random_circle_points(len(node2lines))
-    scene.init(edges, node2lines, pts)
+    scene.init(pg)
 
     view = View(scene, self.a_autoresize)
     self.view = view
-    self.view.setBackgroundBrush(QBrush(Qt.white, Qt.SolidPattern))
     scene.progress.connect(self.progress)
     scene.victory.connect(self.victory)
     self.setCentralWidget(view)
-    scene.postInit()
 
   def progress(self, a, b):
     self.statusBar().showMessage(f"{a} out of {b} lines untangled ({a/b:.1%})")
   def victory(self):
-    self.view.setBackgroundBrush(QBrush(QColor("blanchedalmond"), Qt.SolidPattern))
+    # TODO: do something here? Display time taken?
+    pass
 
 
 def debug():
