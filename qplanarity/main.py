@@ -43,6 +43,7 @@ defaults = {
     'size': 24,
   },
   'ui': {
+    'autofit': False,
     'zoom': True,
     'graphtype': (0, ['Delaunay', 'Melange']),
     'background': {
@@ -582,8 +583,11 @@ class Scene(QGraphicsScene):
 
 
 class View(QGraphicsView):
-  def __init__(self, scene, act_resize, *args):
+  def __init__(self, S, scene, *args):
     super().__init__(*args)
+    self.S = S
+
+    S['ui/autofit'].onValue.connect(lambda x: x and self.resizeEvent(None))
     self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -592,12 +596,11 @@ class View(QGraphicsView):
     
     self.setScene(scene)
     scene.refit.connect(lambda: self.resizeEvent(None), Qt.QueuedConnection)
-    self.act_resize = act_resize
 
     self.setDragMode(QGraphicsView.RubberBandDrag)
 
   def resizeEvent(self, evt):
-    if not self.act_resize.isChecked():
+    if not self.S['ui/autofit'].get():
       return
     margins = QMarginsF(30.0, 30.0, 30.0, 30.0)
     ib = self.scene().itemsBoundingRect()
@@ -650,6 +653,7 @@ class PlanaritySettings(QDialog):
         ["Untangled balls", ColorButton(S['node/color/solved'])],
         20,
         [FCheckBox(S['ui/zoom'], text='Enable zoom (mouse wheel)')],
+        [FCheckBox(S['ui/autofit'], text="Automatically fit graph in window after change")],
         20,
         ["Graph generation algorithm", FComboBox(S['ui/graphtype'])],
         ["""Delaunay generates "nicer" and more regular graphs. Melange generates more "lopsided" graphs that can become pathological and harder to make planar.\n"""],
@@ -700,15 +704,9 @@ class MainWindow(QMainWindow):
     
     self.a_quit = QAction("Quit", shortcut="Ctrl+Q", triggered=self.close)
     self.a_newgame = QAction("New Game", shortcut="Ctrl+N", triggered=self.newGame)
-    self.a_autoresize = QAction(
-      "Autocenter",
-      shortcut="Ctrl+R",
-      checkable=True,
-      checked=True)
     self.a_about = QAction("About", triggered=self.about)
     tb = QToolBar(toolButtonStyle=Qt.ToolButtonTextOnly)
     tb.addAction(self.a_newgame)
-    tb.addAction(self.a_autoresize)
     tb.addAction(self._options.visAction)
     tb.addAction(self.a_about)
     tb.addAction(self.a_quit)
@@ -799,7 +797,7 @@ only people who might read this text.</p>""")
     scene = Scene(self.S)
     scene.init(pg)
 
-    view = View(scene, self.a_autoresize)
+    view = View(self.S, scene)
     self.view = view
     scene.progress.connect(self.progress)
     scene.victory.connect(self.victory)
